@@ -4,7 +4,6 @@
   "description": "NCA Data Collection Portal - Backend (demo)",
   "private": true,
   "scripts": {
-    "prepare": "husky",
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",

@@ -159,19 +159,23 @@ cannot use; it is not the security boundary.
 ## Testing
 
 ```bash
-npm test                 # single run
-npm run test:watch       # watch mode
+npm test                 # unit and component tests, single run
+npm run test:watch       # the same, in watch mode
+npm run test:browser     # Playwright, against a running app
+npm run test:browser:ui  # Playwright in its interactive UI
 ```
 
-The harness is wired — Vitest in a jsdom environment with Testing Library, setup and
-shared helpers in [src/test/](src/test/) — but **no specs have been written yet**, so
-`npm test` currently passes by finding nothing. CI runs it regardless, which means the
-test step is green without proving anything. Treat that as a gap to close, not as
-coverage.
+Two layers. Component tests run under Vitest in a jsdom environment with Testing Library
+— 7 files, 87 tests — with setup and shared helpers in [src/test/](src/test/). Browser
+tests run under Playwright from [e2e/](e2e/) and cover the signed-in journey, auth setup,
+accessibility (including axe), reflow, first-load timings, and the profile screen.
 
-When specs do get written, exercise components the way a user meets them — by role,
-label, and visible text — rather than by internal implementation detail, so a refactor
-that keeps behaviour intact keeps the tests green.
+Only the Vitest layer runs in CI; Playwright needs a live app and a database, so run it
+locally before a release.
+
+Tests exercise components the way a user meets them — by role, label, and visible text —
+rather than by internal implementation detail, so a refactor that keeps behaviour intact
+keeps the tests green.
 
 ---
 
