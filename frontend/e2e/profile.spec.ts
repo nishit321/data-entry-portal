@@ -5,11 +5,11 @@ import { sessionFile } from './helpers';
 /**
  * The profile screen, which is where a phone number is added and confirmed.
  *
- * The browser suite runs against a server with no SMS gateway configured, so what can be proved
- * here is the half that does not need one: the screen exists, it is reachable from the account
- * menu, it says plainly that texts are not set up rather than offering a button that cannot work,
- * and it has no accessibility violations. Confirming a real number is covered by the backend e2e
- * suite, where the gateway is replaced at its own boundary.
+ * Deliberately stops short of sending anything. A real send costs the Authority credit and rings a
+ * handset, and whether one arrived is not something a browser can check. What is checked here is
+ * that the screen exists, is reachable from the account menu, never offers an action it cannot
+ * perform, and has no accessibility violations. Confirming a number end to end is covered by the
+ * backend e2e suite, where the gateway is replaced at its own boundary.
  */
 test.use({ storageState: sessionFile('operator') });
 
@@ -24,12 +24,31 @@ test('is reachable from the account menu', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 2, name: 'Your details' })).toBeVisible();
 });
 
-test('says texts are not set up rather than offering a button that cannot work', async ({
-  page,
-}) => {
+test('is coherent whether or not a gateway is configured', async ({ page }) => {
   await page.goto('/profile');
-  await expect(page.getByText(/Text messages are not set up/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Send me a code' })).toBeDisabled();
+
+  /*
+   * Both states are asserted rather than one.
+   *
+   * The first version of this test assumed no SMS gateway, because there was none when it was
+   * written. A token was then set in `.env` and the test failed — not because anything broke, but
+   * because it had written down a passing environment as though it were a fact about the product.
+   * What is actually true either way is that the screen never offers an action it cannot perform.
+   */
+  const notice = page.getByText(/Text messages are not set up/);
+  const numberField = page.getByLabel(/number/i);
+
+  if (await notice.isVisible()) {
+    // No gateway: say so, and do not offer a box to type into.
+    await expect(numberField).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Send me a code' })).toBeDisabled();
+  } else {
+    // A gateway: the box works, and the button waits for something worth sending.
+    await expect(numberField).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Send me a code' })).toBeDisabled();
+    await numberField.fill('0920000000');
+    await expect(page.getByRole('button', { name: 'Send me a code' })).toBeEnabled();
+  }
 });
 
 test('has no accessibility violations', async ({ page }) => {

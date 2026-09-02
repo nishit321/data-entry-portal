@@ -185,7 +185,6 @@ describe('audit coverage (e2e)', () => {
   let opToken: string;
   let adminId: string;
   let opId: string;
-  let entityId: string;
 
   async function login(email: string): Promise<string> {
     const res = await request(server)
@@ -234,7 +233,6 @@ describe('audit coverage (e2e)', () => {
         licenceNumber: LICENCE,
       },
     });
-    entityId = entity.id;
     const admin = await prisma.user.create({
       data: {
         email: EMAILS[0]!,
