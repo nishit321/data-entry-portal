@@ -1,0 +1,21 @@
+{
+  "name": "data-entry-portal",
+  "version": "0.1.0",
+  "description": "NCA Data Collection Portal — repository root (dev tooling only; backend and frontend are independent npm projects)",
+  "private": true,
+  "scripts": {
+    "prepare": "husky",
+    "format": "prettier --write \"**/*.{ts,tsx,js,cjs,json,md,css,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,cjs,json,md,css,yml,yaml}\""
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.3.3"
+  },
+  "lint-staged": {
+    "**/*.{ts,tsx,js,cjs,json,md,css,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

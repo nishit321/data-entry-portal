@@ -1,0 +1,25 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Playwright: signed-in sessions, traces, screenshots and reports from a run.
+/test-results/
+/playwright-report/
+/blob-report/
+/e2e/.auth/
+
+# Environment — never commit real secrets; .env.example is the tracked template.
+# These lines were lost in an earlier edit; without them `git add -A` stages .env.
+.env
+.env.*
+!.env.example
+
+# Test artefacts
+coverage/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

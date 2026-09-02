@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "audit_action" ADD VALUE 'SUBMISSION_BULK_UPLOADED';
+

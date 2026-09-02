@@ -1,0 +1,82 @@
+/*
+ * Self-hosted Inter (via @fontsource) — no third-party font CDN at runtime.
+ *
+ * These are the *combined* stylesheets on purpose, and it is worth saying why, because the tidier
+ * -looking alternative is a trap. The build ships twenty-eight font files across seven subsets
+ * (Cyrillic, Greek, Vietnamese among them) where an English portal needs eight, so importing
+ * `latin-400.css` and friends looks like an obvious saving. It is the opposite: the per-subset
+ * stylesheets declare their `@font-face` with **no `unicode-range`**, so the browser stops being
+ * able to choose and downloads every face it is given. Measured, the swap took the first load
+ * from 96 kB of font to 237 kB.
+ *
+ * The combined files carry the ranges, so a visitor downloads Latin and nothing else. The extra
+ * files sit unused in the deployment, which costs disk and no bandwidth. See e2e/first-load.spec.ts.
+ */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: theme('colors.gray.100');
+  /* Use the Inter token; a hard-coded system stack would silently defeat it. */
+  font-family: theme('fontFamily.sans');
+  /* The authenticated shell is viewport-height and caps its own height, so no document-level
+     scrollbar appears there (FRONTEND_STANDARDS §3.10) — the sidebar and top bar can't slide off
+     the top of a long list any more. The unauthenticated pages still scroll normally, which is
+     why `overflow` is left alone here. `overscroll-behavior` stops the document from rubber-
+     banding when a scroll gesture reaches the end of a panel inside it. */
+  overscroll-behavior: none;
+}
+
+/* Every scroll container in the app gets a consistent, unobtrusive scrollbar rather than the
+   platform default, which is either invisible until you scroll or a heavy grey slab. */
+@supports (scrollbar-width: thin) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.gray.300') transparent;
+  }
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: theme('colors.gray.300');
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: theme('colors.gray.400');
+}
+
+/* Honour a user's reduced-motion preference across the app (FRONTEND_STANDARDS §3.8). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

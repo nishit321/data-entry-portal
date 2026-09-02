@@ -1,0 +1,117 @@
+{
+  "name": "nca-portal-backend",
+  "version": "0.1.0",
+  "description": "NCA Data Collection Portal - Backend (demo)",
+  "private": true,
+  "scripts": {
+    "prepare": "husky",
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"{src,test,scripts}/**/*.ts\"",
+    "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
+    "format": "prettier --write \"{src,test}/**/*.ts\"",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\"",
+    "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage --passWithNoTests",
+    "test:e2e": "jest --config test/jest-e2e.json",
+    "test:e2e:setup": "ts-node test/setup-test-db.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "db:setup": "prisma migrate dev --name init && ts-node prisma/seed.ts",
+    "load:spike": "ts-node -T test/load/deadline-spike.ts",
+    "backup": "ts-node -T scripts/backup.ts",
+    "restore": "ts-node -T scripts/restore.ts",
+    "backup:verify": "ts-node -T scripts/verify-restore.ts",
+    "routes": "ts-node -T scripts/routes.ts",
+    "preflight": "ts-node -T scripts/preflight.ts",
+    "sms:test": "ts-node -T scripts/sms-test.ts"
+  },
+  "lint-staged": {
+    "{src,test}/**/*.ts": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "prisma/**/*.ts": [
+      "prettier --write"
+    ],
+    "**/*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.4",
+    "@nestjs/config": "^3.2.3",
+    "@nestjs/core": "^10.4.4",
+    "@nestjs/jwt": "^10.2.0",
+    "@nestjs/passport": "^10.0.3",
+    "@nestjs/platform-express": "^10.4.4",
+    "@nestjs/schedule": "^4.1.2",
+    "@nestjs/throttler": "^6.2.1",
+    "@prisma/client": "^5.20.0",
+    "@sendgrid/mail": "^8.1.3",
+    "bcrypt": "^5.1.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "exceljs": "^4.4.0",
+    "helmet": "^8.0.0",
+    "joi": "^17.13.3",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pdfkit": "^0.20.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.5",
+    "@nestjs/schematics": "^10.1.4",
+    "@nestjs/testing": "^10.4.4",
+    "@types/bcrypt": "^5.0.2",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.13",
+    "@types/node": "^22.7.4",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/pdfkit": "^0.17.6",
+    "@types/supertest": "^6.0.2",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-copy": "file:../tools/eslint-plugin-copy",
+    "husky": "^9.1.7",
+    "jest": "^29.7.0",
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.3.3",
+    "prisma": "^5.20.0",
+    "source-map-support": "^0.5.21",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.6.2"
+  }
+}

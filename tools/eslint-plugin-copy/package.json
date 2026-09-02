@@ -1,0 +1,8 @@
+{
+  "name": "eslint-plugin-copy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enforces the voice-and-copy rules in docs/standards/FRONTEND_STANDARDS.md §10.",
+  "main": "index.cjs",
+  "license": "UNLICENSED"
+}

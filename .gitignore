@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Test artefacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# Runtime data — uploaded attachments and database backups hold real filings.
+storage/
+backups/
+
+# Environment — never commit real secrets; .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Project documentation is maintained outside this repository.
+docs/
+ref-doc/
+
+# Local agent and editor session config
+.claude/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

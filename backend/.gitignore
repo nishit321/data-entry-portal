@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Test artefacts
+coverage/
+
+# Uploaded submission attachments (local blob storage)
+storage/
+
+# Environment — never commit real secrets; .env.example is the tracked template
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Backups hold every operator's filings and every attachment. Never commit one.
+backups/

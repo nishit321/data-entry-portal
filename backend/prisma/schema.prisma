@@ -1,0 +1,1682 @@
+// ============================================================================
+// Prisma schema - NCA Data Collection Portal
+// Database: PostgreSQL
+//
+// Conventions:
+//   - Models use PascalCase; physical tables/columns use snake_case (@map).
+//   - Every table has a UUID primary key and created_at / updated_at columns.
+//   - Foreign keys and frequent lookup columns are indexed.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Application roles. Sourced from the Feature & Development Document.
+/// The demo focuses on ADMIN creating users and assigning any of these roles.
+enum Role {
+  ADMIN // System Administrator
+  SUPERVISOR // Authority Supervisor / DG
+  ANALYST // Authority Analyst (M&E)
+  CHECKER // First-stage reviewer
+  VERIFIER // Second-stage reviewer
+  APPROVER // Final sign-off
+  OPERATOR_ADMIN // Operator Administrator (external)
+  OPERATOR_SUBMITTER // Licensee / Operator Submitter (external)
+  CITIZEN // Public user (external)
+
+  @@map("role")
+}
+
+/// Discrete, auditable actions recorded in the audit_logs table.
+enum AuditAction {
+  USER_SIGNUP
+  USER_LOGIN
+  USER_LOGIN_FAILED
+  USER_CREATED
+  USER_UPDATED
+  USER_ROLE_CHANGED
+  USER_ACTIVATED
+  USER_DEACTIVATED
+  USER_DELETED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  ENTITY_CREATED
+  ENTITY_UPDATED
+  ENTITY_STATUS_CHANGED
+  ENTITY_DELETED
+  AGENT_CREATED
+  AGENT_UPDATED
+  AGENT_STATUS_CHANGED
+  AGENT_DELETED
+  REFERENCE_ITEM_CREATED
+  REFERENCE_ITEM_UPDATED
+  REFERENCE_ITEM_DELETED
+  USER_PHONE_CHALLENGED
+  USER_PHONE_VERIFIED
+  USER_PHONE_REMOVED
+  USER_MFA_CHALLENGED
+  USER_MFA_FAILED
+  USER_LOCKED
+  TEMPLATE_CREATED
+  TEMPLATE_UPDATED
+  TEMPLATE_PUBLISHED
+  TEMPLATE_DELETED
+  TEMPLATE_VERSIONED
+  TEMPLATE_SECTION_SAVED
+  TEMPLATE_SECTION_DELETED
+  TEMPLATE_FIELD_SAVED
+  TEMPLATE_FIELD_DELETED
+  PERIOD_CREATED
+  PERIOD_UPDATED
+  PERIOD_OPENED
+  PERIOD_CLOSED
+  PERIOD_DELETED
+  SUBMISSION_CREATED
+  SUBMISSION_UPDATED
+  SUBMISSION_SUBMITTED
+  SUBMISSION_DELETED
+  SUBMISSION_REVIEWED
+  SUBMISSION_APPROVED
+  SUBMISSION_REJECTED
+  SUBMISSION_RESUBMITTED
+  ATTACHMENT_UPLOADED
+  ATTACHMENT_DELETED
+  TEMPLATE_RULE_SAVED
+  TEMPLATE_RULE_DELETED
+  ENFORCEMENT_CASE_OPENED
+  ENFORCEMENT_CASE_RESOLVED
+  ENFORCEMENT_CASE_WAIVED
+  LEVY_RATE_CREATED
+  LEVY_RATE_UPDATED
+  LEVY_RATE_DELETED
+  PENALTY_RULE_CREATED
+  PENALTY_RULE_UPDATED
+  PENALTY_RULE_DELETED
+  PUBLIC_INDICATOR_CREATED
+  PUBLIC_INDICATOR_UPDATED
+  PUBLIC_INDICATOR_DELETED
+  REPORT_SCHEDULE_CREATED
+  REPORT_SCHEDULE_UPDATED
+  REPORT_SCHEDULE_DELETED
+  REPORT_SCHEDULE_SENT
+  NETWORK_SITE_CREATED
+  NETWORK_SITE_UPDATED
+  NETWORK_SITE_DELETED
+  API_CLIENT_CREATED
+  API_CLIENT_UPDATED
+  API_CLIENT_REVOKED
+  API_CLIENT_SECRET_ROTATED
+  API_REQUEST_ACCEPTED
+  API_REQUEST_REFUSED
+  SIGNING_CERTIFICATE_REGISTERED
+  SIGNING_CERTIFICATE_REVOKED
+  SUBMISSION_SIGNATURE_VERIFIED
+  AGREEMENT_CREATED
+  AGREEMENT_UPDATED
+  AGREEMENT_DELETED
+  FEED_CREATED
+  FEED_UPDATED
+  FEED_DELETED
+  FEED_RUN
+  ENFORCEMENT_PENALTY_ASSESSED
+  DOCUMENT_UPLOADED
+  DOCUMENT_REPLACED
+  DOCUMENT_DELETED
+  COMPLAINT_FILED
+  COMPLAINT_STATUS_CHANGED
+  SUBMISSION_BULK_UPLOADED
+
+  @@map("audit_action")
+}
+
+/// Cross-field validation rule operators (VALIDATION_SPEC §6). Rules are data
+/// attached to a template, evaluated by the validation engine over a submission.
+enum RuleType {
+  SUM_EQUALS_TOTAL // sum(operands) == total (±tolerance) — e.g. Postpaid+Prepaid=Total
+  LESS_OR_EQUAL // left ≤ right — e.g. Active users ≤ Registered accounts
+  FLOAT_RECONCILE // balance vs backing: shortfall>1% HARD, surplus>5% SOFT
+  PERIOD_ON_PERIOD // |Δ| vs the prior period's value > threshold% (SOFT)
+  NONZERO_REQUIRES // if `when` field > 0 then `require` field must be > 0 (SOFT)
+
+  @@map("rule_type")
+}
+
+enum RuleSeverity {
+  HARD
+  SOFT
+
+  @@map("rule_severity")
+}
+
+/// Lifecycle of an operator's return. Submissions module drives DRAFT → SUBMITTED;
+/// the review states are used by the workflow module (Checker → Verifier → Approver).
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+
+  @@map("submission_status")
+}
+
+/// Lifecycle of a reporting period the Authority runs.
+enum PeriodStatus {
+  SCHEDULED // created ahead of time; not yet accepting submissions
+  OPEN // accepting submissions
+  CLOSED // no longer accepting submissions
+
+  @@map("period_status")
+}
+
+/// The three-stage review workflow (Q1). Fast-track can skip CHECKER, but APPROVER always runs.
+enum ReviewStage {
+  CHECKER
+  VERIFIER
+  APPROVER
+
+  @@map("review_stage")
+}
+
+enum ReviewDecision {
+  APPROVE
+  REJECT
+
+  @@map("review_decision")
+}
+
+/// What a submission attachment represents. Drives the accepted file formats
+/// (coverage/fibre are geospatial; agent registers are tabular).
+enum AttachmentKind {
+  COVERAGE_MAP // KML / KMZ
+  FIBRE_MAP // OFDS (JSON) / KML / KMZ
+  AGENT_REGISTER // CSV / XLSX
+  OTHER // supporting document (PDF, etc.)
+
+  @@map("attachment_kind")
+}
+
+/// The event a notification tells its recipient about (Q8). Each maps to a
+/// human title/body composed at creation time; the type also drives grouping
+/// and any per-type channel choice (in-app always; email for the ones that
+/// matter when the recipient may not be signed in).
+enum NotificationType {
+  RETURN_AWAITING_REVIEW // to reviewers: a return has reached their stage
+  RETURN_APPROVED // to the operator: their return was approved and locked
+  RETURN_REJECTED // to the operator: their return was sent back for changes
+  ENFORCEMENT_CASE_OPENED // to the operator: a return is overdue and a case has opened
+  ENFORCEMENT_CASE_CLOSED // to the operator: their compliance case was resolved or waived
+  DOCUMENT_EXPIRING // to the operator: a licence/certificate is approaching its expiry date
+  DOCUMENT_EXPIRED // to the operator: a licence/certificate has passed its expiry date
+  COMPLAINT_RECEIVED // to the Authority: a citizen has filed a complaint or suggestion
+
+  @@map("notification_type")
+}
+
+/// Delivery state of an external channel (email/SMS) for a notification. In-app
+/// delivery is implicit (the row itself); this tracks the out-of-app send so a
+/// transient failure can be retried and a persistent one surfaced.
+enum NotificationDeliveryStatus {
+  PENDING // queued, not yet attempted
+  SENT // accepted by the provider
+  FAILED // all attempts exhausted
+
+  @@map("notification_delivery_status")
+}
+
+/// Why a compliance/enforcement case was opened (Q3). Extensible; the deadline
+/// engine currently opens MISSED_DEADLINE cases when the grace window ends with
+/// no filing.
+/// How a publishable figure is rolled up across operators before it leaves the
+/// building. There is no option that publishes an operator's own number, because
+/// Q4 forbids it: what the public sees is the sector, never a company.
+/// Which report a schedule sends. Each maps to an export the portal already
+/// produces on demand; scheduling changes when it is built, not what is in it.
+enum ScheduledReportKind {
+  COMPLIANCE_WORKBOOK // filing status and timeliness across the sector, as Excel
+  LEVY_WORKBOOK // levy assessed per operator, as Excel
+  LEVY_STATEMENT // the same assessment as a PDF statement
+
+  @@map("scheduled_report_kind")
+}
+
+/// How often a scheduled report goes out. An enum rather than a cron expression:
+/// an administrator setting up a quarterly report should not have to know cron,
+/// and a mistyped expression is a report that silently never arrives.
+enum ReportFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+
+  @@map("report_frequency")
+}
+
+/// What a mapped point on the network is. Kept to the kinds NCA already collects
+/// on paper (Q10: coverage and fibre are geospatial, agent registers tabular);
+/// anything else goes under OTHER rather than growing this list per request.
+/// What a machine credential is allowed to do. Deliberately coarse: a scope an
+/// administrator cannot explain to an operator is a scope nobody will set
+/// correctly. Read and write are separated because they carry different risk —
+/// a leaked read credential exposes figures, a leaked write one files returns.
+/// Lifecycle of the data-sharing agreement a feed runs under (Q10).
+enum AgreementStatus {
+  DRAFT // being negotiated; no feed may run
+  ACTIVE // signed and in force
+  EXPIRED // ran out; feeds stop
+  TERMINATED // ended early by either side
+
+  @@map("agreement_status")
+}
+
+/// How often NCA pulls a feed.
+enum FeedFrequency {
+  HOURLY
+  DAILY
+  WEEKLY
+
+  @@map("feed_frequency")
+}
+
+/// How a feed run ended, so a failure is a record rather than a log line.
+enum FeedRunOutcome {
+  SUCCEEDED
+  FAILED
+  SKIPPED // the agreement was not in force, so nothing was fetched
+
+  @@map("feed_run_outcome")
+}
+
+/// How a return was signed (Q6). SIMPLE is the authenticated action plus a name
+/// and timestamp; PKI adds a signature made with the signer's own private key,
+/// which anyone holding the certificate can check again later.
+enum SignatureFormat {
+  SIMPLE
+  PKI
+
+  @@map("signature_format")
+}
+
+/// Lifecycle of a registered signing certificate.
+enum SigningCertificateStatus {
+  ACTIVE
+  REVOKED
+
+  @@map("signing_certificate_status")
+}
+
+enum ApiScope {
+  READ_PERIODS // which returns are open, and when they are due
+  READ_RETURNS // the operator's own filed returns
+  SUBMIT_RETURNS // create, fill and submit a return
+  FEED_INGEST // accept a scheduled metric feed
+
+  @@map("api_scope")
+}
+
+/// Lifecycle of a machine credential.
+enum ApiClientStatus {
+  ACTIVE
+  SUSPENDED // temporarily refused, e.g. during an investigation
+  REVOKED // permanently dead; never re-enabled
+
+  @@map("api_client_status")
+}
+
+enum NetworkSiteKind {
+  BASE_STATION // a mast or cell site
+  FIBRE_NODE // a splice point, cabinet, or termination
+  POP // a point of presence / exchange
+  DATA_CENTRE
+  OTHER
+
+  @@map("network_site_kind")
+}
+
+/// Whether a site is carrying traffic, being built, or has been retired.
+enum NetworkSiteStatus {
+  PLANNED
+  ACTIVE
+  DECOMMISSIONED
+
+  @@map("network_site_status")
+}
+
+enum PublicAggregation {
+  SUM // e.g. total subscribers across the sector
+  AVERAGE // e.g. average call-drop rate
+  COUNT // how many operators reported at all
+
+  @@map("public_aggregation")
+}
+
+enum EnforcementReason {
+  MISSED_DEADLINE // no return filed by the end of the grace window
+
+  @@map("enforcement_reason")
+}
+
+/// What a citizen's submission is about (Q4). Kept broad on purpose: the first
+/// release is intake, and a category the public understands beats a taxonomy that
+/// mirrors internal process.
+enum ComplaintCategory {
+  SERVICE_QUALITY
+  BILLING
+  COVERAGE
+  AGENT_CONDUCT
+  DATA_PRIVACY
+  SUGGESTION
+  OTHER
+
+  @@map("complaint_category")
+}
+
+/// Lifecycle of a citizen complaint. RECEIVED on intake; the Authority moves it
+/// through review to a resolution. CLOSED covers cases ended without a remedy
+/// (withdrawn, out of scope, no contact possible).
+enum ComplaintStatus {
+  RECEIVED
+  IN_REVIEW
+  RESOLVED
+  CLOSED
+
+  @@map("complaint_status")
+}
+
+/// What a stored document is. Drives how it is labelled and whether an expiry
+/// date is expected (a licence and a certificate both expire; a policy may not).
+enum DocumentKind {
+  LICENCE
+  CERTIFICATE
+  OTHER
+
+  @@map("document_kind")
+}
+
+/// How far through its life a document is, relative to its expiry date. Computed
+/// by the expiry sweep and stored so the same alert is not sent twice: an alert
+/// goes out only when a document moves into a new stage.
+enum DocumentExpiryStage {
+  EXPIRING // inside the warning window, not yet past the expiry date
+  EXPIRED // past the expiry date
+
+  @@map("document_expiry_stage")
+}
+
+/// Lifecycle of an enforcement case. OPEN until the Authority resolves it (the
+/// operator has since filed / been dealt with) or waives it (no action taken).
+enum EnforcementStatus {
+  OPEN
+  RESOLVED
+  WAIVED
+
+  @@map("enforcement_status")
+}
+
+/// Lifecycle of a questionnaire template. DRAFT is editable; PUBLISHED is locked
+/// and used by reporting periods/submissions; ARCHIVED is a superseded version.
+enum TemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@map("template_status")
+}
+
+/// Reporting cycle for a section or field (VALIDATION_SPEC §4).
+enum ReportingFrequency {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  QUARTERLY_AND_ANNUAL
+
+  @@map("reporting_frequency")
+}
+
+/// The data type of a questionnaire field. Precision defaults follow
+/// VALIDATION_SPEC §5 (INTEGER 0dp, DECIMAL/MONETARY/PERCENTAGE 2dp, …).
+enum FieldType {
+  INTEGER
+  DECIMAL
+  PERCENTAGE
+  MONETARY
+  BOOLEAN
+  DATE
+  TEXT
+  TEXTAREA
+  REFERENCE // value chosen from a ReferenceCategory lookup
+
+  @@map("field_type")
+}
+
+/// How a field's annual figure is treated (VALIDATION_SPEC §4.1).
+enum FlowOrStock {
+  NONE // non-periodic / not rolled up
+  STOCK // point-in-time; annual = year-end, never summed
+  FLOW_DERIVED // annual auto-summed from quarters, read-only
+  FLOW_ENTERED // operator enters annual (revenue/capex); reconciled to the sum
+
+  @@map("flow_or_stock")
+}
+
+/// Categories of managed lookup lists (spectrum bands, technologies, etc.).
+/// Items within a category are admin-editable at runtime; adding a whole new
+/// category is a deliberate schema change. Referenced by templates/validation.
+enum ReferenceCategory {
+  SPECTRUM_BAND
+  TECHNOLOGY
+  SERVICE_TYPE
+  GEO_CLASSIFICATION
+  ENERGY_GENERATION_TYPE
+  ENERGY_STORAGE_TYPE
+  FIXED_ACCESS_TYPE
+  TRANSACTION_TYPE
+
+  @@map("reference_category")
+}
+
+/// Type of regulated entity. Drives which questionnaire sections apply to it
+/// (e.g. Mobile Money sections apply only to MMOs). Sourced from the
+/// questionnaire's "Type of Operator" field.
+enum EntityType {
+  MNO // Mobile Network Operator
+  ISP // Internet Service Provider
+  MMO // Mobile Money Operator / Mobile DFS provider
+  VENDOR // Supporting vendor
+  OTHER
+
+  @@map("entity_type")
+}
+
+/// Onboarding / regulatory lifecycle state of an entity.
+enum EntityStatus {
+  PENDING // registered, awaiting Authority verification
+  ACTIVE // verified and able to submit
+  SUSPENDED // temporarily barred (e.g. enforcement)
+  DEREGISTERED // licence ended; retained for history
+
+  @@map("entity_status")
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id                  String    @id @default(uuid()) @db.Uuid
+  email               String    @unique
+  passwordHash        String    @map("password_hash")
+  firstName           String    @map("first_name")
+  lastName            String    @map("last_name")
+  role                Role      @default(OPERATOR_SUBMITTER)
+  isActive            Boolean   @default(true) @map("is_active")
+  /// A non-interactive account that exists only so a machine credential's filings
+  /// have an author (Q10, Phase 3). It carries no usable password, is refused at
+  /// every login path, and is hidden from the team screens — it is a name in the
+  /// audit trail, not a person. Created and retired with its ApiClient.
+  isServiceAccount    Boolean   @default(false) @map("is_service_account")
+  /// The regulated entity this user belongs to. Null for Authority-internal
+  /// roles (ADMIN/SUPERVISOR/ANALYST/reviewers) and public CITIZEN users.
+  /// This column anchors data segregation: an operator user only ever sees
+  /// data scoped to their entityId.
+  entityId            String?   @map("entity_id") @db.Uuid
+  /// Multi-factor authentication toggle. On by default; a login requires an OTP
+  /// challenge to be verified before a token is issued (see OtpChallenge).
+  mfaEnabled          Boolean   @default(true) @map("mfa_enabled")
+  /// E.164, e.g. +211920000000. Optional: SMS is a second way of reaching somebody, never the only
+  /// one, so an account without a number works exactly as it always did.
+  phone               String?
+  /// When the number was proved to belong to this person. Null means unverified, and an unverified
+  /// number is never sent to: a mistyped digit otherwise means the Authority's reminders go to a
+  /// stranger, quietly, for years.
+  phoneVerifiedAt     DateTime? @map("phone_verified_at")
+  /// Brute-force protection: consecutive failed password attempts, and a lock
+  /// expiry set once the threshold is crossed. Reset on a successful password.
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  lastLoginAt         DateTime? @map("last_login_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  /// Soft-delete: users are retained (never physically removed) for audit and
+  /// the ≥10-year retention policy. Excluded from all queries when set.
+  deletedAt           DateTime? @map("deleted_at")
+
+  entity                   Entity?              @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  resetTokens              PasswordResetToken[]
+  otpChallenges            OtpChallenge[]
+  phoneVerifications       PhoneVerification[]
+  auditLogs                AuditLog[]
+  signedSubmissions        Submission[]         @relation("SubmissionSignedBy")
+  notifications            Notification[]       @relation("UserNotifications")
+  resolvedEnforcementCases EnforcementCase[]    @relation("EnforcementResolvedBy")
+  uploadedDocuments        DocumentRecord[]     @relation("DocumentUploadedBy")
+  handledComplaints        Complaint[]          @relation("ComplaintHandledBy")
+  reportSubscriptions      ReportRecipient[]    @relation("ReportRecipient")
+  apiCredential            ApiClient?           @relation("ApiClientServiceUser")
+  signingCertificates      SigningCertificate[] @relation("UserSigningCertificates")
+
+  @@index([role])
+  @@index([isActive])
+  @@index([entityId])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+/// A regulated organisation the Authority collects data from (MNO, ISP, MMO,
+/// vendor). The anchor of the external side of the platform: operator users and
+/// agents hang off it, and data segregation is scoped by its id. Not
+/// hard-deleted — regulatory data is retained (soft-delete via deletedAt).
+model Entity {
+  id                  String       @id @default(uuid()) @db.Uuid
+  name                String
+  type                EntityType
+  status              EntityStatus @default(PENDING)
+  /// Licence identifier issued by the Authority. Unique across entities.
+  licenceNumber       String       @unique @map("licence_number")
+  licenceIssuedAt     DateTime?    @map("licence_issued_at")
+  yearsInOperation    Int?         @map("years_in_operation")
+  geographicScope     String?      @map("geographic_scope")
+  headquartersAddress String?      @map("headquarters_address")
+  primaryContactName  String?      @map("primary_contact_name")
+  primaryContactTitle String?      @map("primary_contact_title")
+  primaryContactEmail String?      @map("primary_contact_email")
+  primaryContactPhone String?      @map("primary_contact_phone")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  deletedAt           DateTime?    @map("deleted_at")
+
+  users            User[]
+  agents           Agent[]
+  submissions      Submission[]
+  streaks          ComplianceStreak[]
+  enforcementCases EnforcementCase[]
+  documents        DocumentRecord[]
+  complaints       Complaint[]
+  networkSites     NetworkSite[]
+  apiClients       ApiClient[]
+  agreements       DataSharingAgreement[]
+  feedMetrics      FeedMetric[]
+
+  @@index([type])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("entities")
+}
+
+/// A cash-in/cash-out agent operating beneath a parent operator (Entity).
+/// Expected to grow into the thousands (Q11). The Authority retains full
+/// cross-operator visibility; an operator sees only its own agents.
+model Agent {
+  id             String    @id @default(uuid()) @db.Uuid
+  entityId       String    @map("entity_id") @db.Uuid
+  /// Operator-assigned agent reference. Unique within the owning entity.
+  agentReference String    @map("agent_reference")
+  name           String
+  location       String?
+  latitude       Decimal?  @db.Decimal(9, 6)
+  longitude      Decimal?  @db.Decimal(9, 6)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, agentReference])
+  @@index([entityId])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("agents")
+}
+
+/// A single value in a managed lookup list (e.g. the "900 MHz" spectrum band).
+/// Admins extend these at runtime — including promoting frequent "Other" entries
+/// into the managed list — with no code change. `code` is the stable key
+/// templates/submissions store; `label` is what users see.
+model ReferenceItem {
+  id          String            @id @default(uuid()) @db.Uuid
+  category    ReferenceCategory
+  /// Stable machine key, unique within its category.
+  code        String
+  label       String
+  description String?
+  sortOrder   Int               @default(0) @map("sort_order")
+  isActive    Boolean           @default(true) @map("is_active")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  deletedAt   DateTime?         @map("deleted_at")
+
+  @@unique([category, code])
+  @@index([category])
+  @@index([isActive])
+  @@index([deletedAt])
+  @@map("reference_items")
+}
+
+/// A versioned questionnaire definition. Admins build it as a DRAFT, then
+/// PUBLISH it (locking it) for reporting periods/submissions to use. Editing a
+/// published template means creating a new version (a fresh DRAFT clone).
+model ReportingTemplate {
+  id          String         @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  version     Int            @default(1)
+  status      TemplateStatus @default(DRAFT)
+  publishedAt DateTime?      @map("published_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  deletedAt   DateTime?      @map("deleted_at")
+
+  sections    TemplateSection[]
+  periods     ReportingPeriod[]
+  submissions Submission[]
+  rules       TemplateRule[]
+
+  @@unique([name, version])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("reporting_templates")
+}
+
+/// A section of a template (e.g. "Financial Information"). Carries applicability
+/// (which entity types it applies to; an optional service that must be ticked)
+/// and its reporting frequency (VALIDATION_SPEC §3, §4).
+model TemplateSection {
+  id                    String             @id @default(uuid()) @db.Uuid
+  templateId            String             @map("template_id") @db.Uuid
+  key                   String
+  title                 String
+  description           String?
+  order                 Int                @default(0)
+  applicableEntityTypes EntityType[]       @map("applicable_entity_types")
+  frequency             ReportingFrequency @default(QUARTERLY_AND_ANNUAL)
+  /// If set, this section applies only when the operator ticks this service in
+  /// Section 1 (a SERVICE_TYPE reference code, e.g. "MOBILE_MONEY").
+  requiredServiceCode   String?            @map("required_service_code")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  template ReportingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  fields   TemplateField[]
+
+  @@unique([templateId, key])
+  @@index([templateId])
+  @@map("template_sections")
+}
+
+/// A single field within a section, carrying every attribute the validation
+/// engine and the submission form need (VALIDATION_SPEC §2, §4.1, §5, §7).
+model TemplateField {
+  id                String              @id @default(uuid()) @db.Uuid
+  sectionId         String              @map("section_id") @db.Uuid
+  key               String
+  label             String
+  description       String?
+  order             Int                 @default(0)
+  dataType          FieldType           @map("data_type")
+  unit              String?
+  /// Decimal-places override; when null the FieldType default applies (§5).
+  decimals          Int?
+  isMandatory       Boolean             @default(false) @map("is_mandatory")
+  flowOrStock       FlowOrStock         @default(NONE) @map("flow_or_stock")
+  minValue          Decimal?            @map("min_value") @db.Decimal(18, 2)
+  maxValue          Decimal?            @map("max_value") @db.Decimal(18, 2)
+  /// For dataType REFERENCE: the lookup list the value is chosen from.
+  referenceCategory ReferenceCategory?  @map("reference_category")
+  /// Controlled "Other (Specify)" pair — a mandatory free-text description when
+  /// the operator selects "Other" (VALIDATION_SPEC §7).
+  allowsOther       Boolean             @default(false) @map("allows_other")
+  /// Field-level frequency exception (e.g. Section 2 items 2–5 annual only).
+  frequencyOverride ReportingFrequency? @map("frequency_override")
+  /// Marks the monetary field(s) whose value is the assessable revenue for the regulatory levy
+  /// (VALIDATION_SPEC §4.1 — the levy is assessed on annual revenue). The levy engine sums the
+  /// levy-basis fields on an approved return and applies the configured rate.
+  isLevyBasis       Boolean             @default(false) @map("is_levy_basis")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  section          TemplateSection   @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  submissionValues SubmissionValue[]
+
+  @@unique([sectionId, key])
+  @@index([sectionId])
+  @@map("template_fields")
+}
+
+/// A configurable cross-field validation rule on a template (VALIDATION_SPEC §6).
+/// `config` holds the operand field keys + thresholds for the rule `type`. Rules
+/// are edited only on a DRAFT template and cloned on new-version.
+model TemplateRule {
+  id         String       @id @default(uuid()) @db.Uuid
+  templateId String       @map("template_id") @db.Uuid
+  type       RuleType
+  severity   RuleSeverity @default(HARD)
+  /// Human message shown when the rule is violated.
+  label      String
+  /// Operator-specific configuration (operand field keys, tolerances, …).
+  config     Json
+  order      Int          @default(0)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  template ReportingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@map("template_rules")
+}
+
+/// A reporting cycle the Authority opens against a published template — the
+/// container submissions attach to. Carries the window it covers, the due date,
+/// and a working-day grace window (Q3). The compliance phase (on-time / grace /
+/// overdue) is computed from these dates at read time, not stored.
+model ReportingPeriod {
+  id          String             @id @default(uuid()) @db.Uuid
+  templateId  String             @map("template_id") @db.Uuid
+  frequency   ReportingFrequency
+  /// Human label for the cycle, e.g. "2026 Q1", "January 2026", "FY2026".
+  label       String
+  periodStart DateTime           @map("period_start")
+  periodEnd   DateTime           @map("period_end")
+  dueDate     DateTime           @map("due_date")
+  /// Working days accepted after the due date before a return is non-compliant.
+  graceDays   Int                @default(5) @map("grace_days")
+  status      PeriodStatus       @default(OPEN)
+  openedAt    DateTime?          @map("opened_at")
+  closedAt    DateTime?          @map("closed_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  deletedAt   DateTime?          @map("deleted_at")
+
+  template ReportingTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  submissions      Submission[]
+  enforcementCases EnforcementCase[]
+
+  @@unique([templateId, frequency, label])
+  @@index([templateId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([deletedAt])
+  @@map("reporting_periods")
+}
+
+/// An operator's return for one (entity, period): the filled-in template. One per
+/// entity per period. DRAFT while being filled; SUBMITTED locks it (with a simple
+/// e-signature + reference number). Soft-deleted; retained for audit/history.
+model Submission {
+  id                 String           @id @default(uuid()) @db.Uuid
+  /// Unique human reference (e.g. NCA/SUB/2026/000123). Null until submitted.
+  referenceNumber    String?          @unique @map("reference_number")
+  entityId           String           @map("entity_id") @db.Uuid
+  periodId           String           @map("period_id") @db.Uuid
+  templateId         String           @map("template_id") @db.Uuid
+  status             SubmissionStatus @default(DRAFT)
+  /// The review stage a SUBMITTED/UNDER_REVIEW return is currently waiting on (Q1). Null before
+  /// submission and once it reaches a terminal state (APPROVED/REJECTED).
+  reviewStage        ReviewStage?     @map("review_stage")
+  /// Populated when a reviewer rejects; shown to the operator so they know what to fix (Q1).
+  rejectionReason    String?          @map("rejection_reason")
+  /// Set when the Approver signs off — an approved return is permanently locked.
+  lockedAt           DateTime?        @map("locked_at")
+  /// Resubmission versioning (Q1): each revise-and-resubmit is a new version that supersedes the
+  /// rejected one, which is retained as history.
+  version            Int              @default(1)
+  supersedesId       String?          @unique @map("supersedes_id") @db.Uuid
+  /// True when submitted after the due date (within grace or overdue) — Q3.
+  isLate             Boolean          @default(false) @map("is_late")
+  submittedAt        DateTime?        @map("submitted_at")
+  /// Simple electronic signature (Q6): an authenticated action, name + timestamp,
+  /// recorded here and in the audit trail. Upgradeable to PKI later.
+  signedByUserId     String?          @map("signed_by_user_id") @db.Uuid
+  signedName         String?          @map("signed_name")
+  signedAt           DateTime?        @map("signed_at")
+  /// Certificate-based signature (Q6, Phase 3). Additive: a PKI-signed return
+  /// carries the simple signature above as well.
+  signatureFormat    SignatureFormat  @default(SIMPLE) @map("signature_format")
+  /// The canonical digest of the return's content at the moment it was signed.
+  /// Recomputing it later and finding it different is how tampering is detected.
+  signatureDigest    String?          @map("signature_digest")
+  /// The signature itself, base64.
+  signatureValue     String?          @map("signature_value")
+  signatureCertId    String?          @map("signature_cert_id") @db.Uuid
+  /// Soft warnings captured at submit time, for reviewers (hard errors block).
+  validationWarnings Json?            @map("validation_warnings")
+  createdById        String           @map("created_by_id") @db.Uuid
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  deletedAt          DateTime?        @map("deleted_at")
+
+  entity        Entity                 @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  period        ReportingPeriod        @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  template      ReportingTemplate      @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  values        SubmissionValue[]
+  attachments   SubmissionAttachment[]
+  /// The user account whose e-signature filed this return (Q6). Kept for the audit
+  /// trail even if the account is later removed, so the record shows who signed.
+  signedBy      User?                  @relation("SubmissionSignedBy", fields: [signedByUserId], references: [id], onDelete: SetNull)
+  /// The certificate a PKI signature was made with. Restrict, not cascade: a
+  /// signature that cannot be traced to its certificate cannot be checked, and a
+  /// signature nobody can check is not a signature.
+  signatureCert SigningCertificate?    @relation(fields: [signatureCertId], references: [id], onDelete: Restrict)
+  /// Review decisions taken on this return (Checker / Verifier / Approver), for the history trail.
+  reviewSteps   ReviewStep[]
+  /// The rejected version this one replaces (self-relation), and the back-reference.
+  supersedes    Submission?            @relation("SubmissionVersion", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy  Submission?            @relation("SubmissionVersion")
+  notifications Notification[]
+
+  // A rejected version and its replacement share (entity, period) but differ by version, so the
+  // DB guarantees no two returns collide on the same (entity, period, version) — this backs the
+  // service's "one current return per period" rule against concurrent creates.
+  @@unique([entityId, periodId, version])
+  @@index([entityId])
+  @@index([reviewStage])
+  @@index([periodId])
+  @@index([templateId])
+  @@index([status])
+  @@index([isLate])
+  @@index([submittedAt])
+  @@index([deletedAt])
+  @@map("submissions")
+}
+
+/// One review decision taken on a submission at a given stage (Q1). Fast-track skips the CHECKER
+/// row but an APPROVER row is always written. Append-only history behind the review timeline.
+model ReviewStep {
+  id           String         @id @default(uuid()) @db.Uuid
+  submissionId String         @map("submission_id") @db.Uuid
+  stage        ReviewStage
+  decision     ReviewDecision
+  actorId      String         @map("actor_id") @db.Uuid
+  comment      String?
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@map("review_steps")
+}
+
+/// Per (entity, template-family) counter of consecutive clean, approved periods — drives the
+/// fast-track rule (Q2). Reset to 0 on any rejection, a late submission, or a licence change.
+model ComplianceStreak {
+  id           String   @id @default(uuid()) @db.Uuid
+  entityId     String   @map("entity_id") @db.Uuid
+  templateName String   @map("template_name")
+  count        Int      @default(0)
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, templateName])
+  @@map("compliance_streaks")
+}
+
+/// A supporting file uploaded against a submission — coverage maps (KML/KMZ), fibre data (OFDS),
+/// agent registers, etc. Metadata lives here; the blob lives in the storage backend under
+/// `storageKey`. Soft-deleted so the record is retained even after an operator removes the file.
+model SubmissionAttachment {
+  id           String         @id @default(uuid()) @db.Uuid
+  submissionId String         @map("submission_id") @db.Uuid
+  kind         AttachmentKind @default(OTHER)
+  fileName     String         @map("file_name")
+  mimeType     String         @map("mime_type")
+  sizeBytes    Int            @map("size_bytes")
+  /// Opaque key/path the storage backend uses to fetch the blob (never the original name).
+  storageKey   String         @map("storage_key")
+  uploadedById String         @map("uploaded_by_id") @db.Uuid
+  createdAt    DateTime       @default(now()) @map("created_at")
+  deletedAt    DateTime?      @map("deleted_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@index([deletedAt])
+  @@map("submission_attachments")
+}
+
+/// One answered field of a submission, keyed to a TemplateField. Values are held
+/// as text and interpreted per the field's type at validation time. "Data
+/// unavailable" is NULL value + a mandatory reason (VALIDATION_SPEC §3); the
+/// controlled "Other (Specify)" free text lives in otherText.
+model SubmissionValue {
+  id                String   @id @default(uuid()) @db.Uuid
+  submissionId      String   @map("submission_id") @db.Uuid
+  fieldId           String   @map("field_id") @db.Uuid
+  valueText         String?  @map("value_text")
+  isUnavailable     Boolean  @default(false) @map("is_unavailable")
+  unavailableReason String?  @map("unavailable_reason")
+  otherText         String?  @map("other_text")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  submission Submission    @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  field      TemplateField @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionId, fieldId])
+  @@index([submissionId])
+  @@map("submission_values")
+}
+
+/// An in-app notification to a single user, optionally also delivered by email
+/// (Q8). The row is the in-app message (with a read marker); the email* columns
+/// record the out-of-app send so a transient failure can be retried. SMS is a
+/// planned channel — the dispatcher already abstracts it, delivery lands with the
+/// SMS gateway. Retained (not soft-deleted): notifications are a light audit of
+/// what a user was told and when.
+model Notification {
+  id           String           @id @default(uuid()) @db.Uuid
+  recipientId  String           @map("recipient_id") @db.Uuid
+  type         NotificationType
+  title        String
+  body         String
+  /// In-app deep link the notification opens to (e.g. /submissions/:id). Relative.
+  linkPath     String?          @map("link_path")
+  /// The submission this notification is about, when it has one (for grouping/cleanup).
+  submissionId String?          @map("submission_id") @db.Uuid
+  /// Set when the recipient has read it; null means unread (drives the unread badge).
+  readAt       DateTime?        @map("read_at")
+
+  /// Email channel: null when no email was requested for this notification.
+  emailStatus   NotificationDeliveryStatus? @map("email_status")
+  emailAttempts Int                         @default(0) @map("email_attempts")
+  emailError    String?                     @map("email_error")
+
+  /// The same record for the SMS channel. Null status means SMS was not attempted for this one:
+  /// most notifications do not warrant a text message (see SMS_WORTHY in channels.ts).
+  smsStatus      NotificationDeliveryStatus? @map("sms_status")
+  smsAttempts    Int                         @default(0) @map("sms_attempts")
+  smsError       String?                     @map("sms_error")
+  /// The gateway's own reference, when it returns one. Kept so a delivery question asked three
+  /// months later can be taken back to the vendor with something they can look up.
+  smsProviderRef String?                     @map("sms_provider_ref")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  recipient  User        @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
+  // The unread badge and list both read by recipient, newest first; this index serves both.
+  @@index([recipientId, readAt, createdAt])
+  @@index([submissionId])
+  @@map("notifications")
+}
+
+/// A compliance/enforcement case against an entity for a reporting period (Q3).
+/// Opened automatically by the deadline engine when the grace window ends with no
+/// filing, and worked by the Authority (resolve / waive). The penalty schedule
+/// (config, from NCA Legal) is a later phase — this model is the flag and the
+/// case record it hangs on, not the sanction. Retained (status, not deleted).
+model EnforcementCase {
+  id             String            @id @default(uuid()) @db.Uuid
+  entityId       String            @map("entity_id") @db.Uuid
+  periodId       String            @map("period_id") @db.Uuid
+  reason         EnforcementReason @default(MISSED_DEADLINE)
+  status         EnforcementStatus @default(OPEN)
+  /// Free-text context captured when the case is opened (e.g. the missed deadline).
+  note           String?
+  openedAt       DateTime          @default(now()) @map("opened_at")
+  /// Set when the Authority resolves or waives the case.
+  resolvedById   String?           @map("resolved_by_id") @db.Uuid
+  resolvedAt     DateTime?         @map("resolved_at")
+  resolutionNote String?           @map("resolution_note")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  /// The schedule line the assessment was made under, kept so an amount can always be explained.
+  /// Null when no schedule was in force when the case opened.
+  penaltyRuleId     String?   @map("penalty_rule_id") @db.Uuid
+  /// The amount assessed so far (SSP). Recomputed while the case is open and the default
+  /// continues; frozen once the default ends or the case is closed.
+  penaltyAmount     Decimal?  @map("penalty_amount") @db.Decimal(18, 2)
+  /// Days of continued default the amount rests on, so the figure can be checked by hand.
+  penaltyDays       Int       @default(0) @map("penalty_days")
+  penaltyAssessedAt DateTime? @map("penalty_assessed_at")
+  /// When the contravention began: the end of the grace window. Accrual runs from here.
+  defaultStartedAt  DateTime? @map("default_started_at")
+  /// When the default ended, because the return finally arrived. Accrual stops here.
+  defaultEndedAt    DateTime? @map("default_ended_at")
+
+  // A case is a child record of its entity and period — it cannot outlive them. (In production
+  // entities/periods are soft-deleted, never removed, so this cascade only matters to test teardown.)
+  entity      Entity          @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  period      ReportingPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  resolvedBy  User?           @relation("EnforcementResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  // Restrict, not cascade: a schedule line that has priced a real case must not be deletable in a
+  // way that erases how that amount was arrived at.
+  penaltyRule PenaltyRule?    @relation(fields: [penaltyRuleId], references: [id], onDelete: Restrict)
+
+  // One case per (entity, period, reason) so the deadline sweep is idempotent.
+  @@unique([entityId, periodId, reason])
+  @@index([status])
+  @@index([entityId])
+  @@index([periodId])
+  @@index([penaltyRuleId])
+  @@map("enforcement_cases")
+}
+
+/// An entity's licence, certificate, or supporting document. Versioned rather than
+/// edited in place: replacing a document creates a new version that supersedes the
+/// previous one, so the history of what was on file (and when) is preserved for
+/// audit. Expiry is tracked and swept, alerting the operator before and after the
+/// date passes. Soft-deleted; the blob lives in StorageService, keyed opaquely.
+model DocumentRecord {
+  id        String       @id @default(uuid()) @db.Uuid
+  entityId  String       @map("entity_id") @db.Uuid
+  kind      DocumentKind @default(LICENCE)
+  title     String
+  /// The licence or certificate number as issued by the Authority.
+  reference String?
+  issuedAt  DateTime?    @map("issued_at")
+  /// Null for a document that does not expire (a policy, a letter).
+  expiresAt DateTime?    @map("expires_at")
+
+  /// Versioning: each replacement supersedes exactly one previous version.
+  version      Int     @default(1)
+  supersedesId String? @unique @map("supersedes_id") @db.Uuid
+
+  fileName   String @map("file_name")
+  mimeType   String @map("mime_type")
+  sizeBytes  Int    @map("size_bytes")
+  /// Opaque key the storage backend uses to fetch the blob (never the original name).
+  storageKey String @map("storage_key")
+
+  uploadedById String    @map("uploaded_by_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  /// The last expiry stage an alert was sent for, so the sweep stays idempotent
+  /// and only notifies when the document moves into a new stage.
+  alertedStage DocumentExpiryStage? @map("alerted_stage")
+
+  entity       Entity          @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  uploadedBy   User            @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  /// The version this one replaces (self-relation), and the back-reference.
+  supersedes   DocumentRecord? @relation("DocumentVersion", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy DocumentRecord? @relation("DocumentVersion")
+
+  @@index([entityId])
+  @@index([expiresAt])
+  @@index([deletedAt])
+  @@map("document_records")
+}
+
+/// A complaint or suggestion filed by a member of the public (Q4). Intake is open
+/// to anyone, so nothing here may be readable from a guessable identifier: the
+/// reference number is sequential and shareable, and the **tracking code** is the
+/// secret that unlocks it. Only the SHA-256 hash of that code is stored — the raw
+/// code is shown to the citizen once, exactly like a password-reset token.
+/// Retained, never hard-deleted.
+model Complaint {
+  id               String            @id @default(uuid()) @db.Uuid
+  /// Human reference given to the citizen, e.g. NCA/CMP/2026/000123. Not a secret.
+  referenceNumber  String            @unique @map("reference_number")
+  /// SHA-256 of the tracking code. Paired with the reference to read a complaint.
+  trackingCodeHash String            @map("tracking_code_hash")
+  category         ComplaintCategory @default(OTHER)
+  status           ComplaintStatus   @default(RECEIVED)
+  subject          String
+  description      String
+
+  /// Contact details are optional: a citizen may file anonymously. When absent the
+  /// Authority can still work the case but cannot follow up directly.
+  complainantName  String? @map("complainant_name")
+  complainantEmail String? @map("complainant_email")
+  complainantPhone String? @map("complainant_phone")
+
+  /// The operator the complaint is about, when the citizen names one.
+  aboutEntityId String? @map("about_entity_id") @db.Uuid
+
+  /// Filled as the Authority works the case.
+  resolutionNote String?   @map("resolution_note")
+  handledById    String?   @map("handled_by_id") @db.Uuid
+  resolvedAt     DateTime? @map("resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  aboutEntity Entity? @relation(fields: [aboutEntityId], references: [id], onDelete: SetNull)
+  handledBy   User?   @relation("ComplaintHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([category])
+  @@index([aboutEntityId])
+  @@index([createdAt])
+  @@map("complaints")
+}
+
+/// A regulatory levy rate that applies over a date window (Q14). The levy owed by an operator is
+/// the configured percentage of their assessable (approved) revenue; the rate is config, set by the
+/// Authority, and changes over time — the applicable rate for a period is the one whose window
+/// covers that period's due date. Soft-deleted; retained for the assessment history.
+model LevyRate {
+  id            String    @id @default(uuid()) @db.Uuid
+  /// Percentage of assessable revenue, e.g. 2.5000 for 2.5%.
+  ratePercent   Decimal   @map("rate_percent") @db.Decimal(6, 4)
+  effectiveFrom DateTime  @map("effective_from")
+  /// Open-ended when null (applies to every period on or after `effectiveFrom`).
+  effectiveTo   DateTime? @map("effective_to")
+  label         String?
+  createdById   String?   @map("created_by_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  @@index([effectiveFrom])
+  @@index([deletedAt])
+  @@map("levy_rates")
+}
+
+/// One line of NCA Legal & Licensing's penalty schedule (Q3: the schedule is
+/// config-driven and supplied by NCA, never coded here). An administrator enters
+/// the amounts; the enforcement engine reads them.
+///
+/// Effective-dated exactly like LevyRate, and for the same reason: a case is priced
+/// under the schedule in force on the day the contravention began. Re-pricing a
+/// closed contravention because the schedule changed afterwards would not survive
+/// challenge, so the rule that priced a case is recorded on the case itself.
+model PenaltyRule {
+  id            String            @id @default(uuid()) @db.Uuid
+  reason        EnforcementReason @default(MISSED_DEADLINE)
+  /// Applies to one class of operator, or to every class when null.
+  entityType    EntityType?       @map("entity_type")
+  /// Charged once when the contravention is recorded (SSP).
+  fixedAmount   Decimal           @default(0) @map("fixed_amount") @db.Decimal(18, 2)
+  /// Charged for each further day the default continues (SSP).
+  dailyAmount   Decimal           @default(0) @map("daily_amount") @db.Decimal(18, 2)
+  /// Ceiling on the total. Uncapped when null.
+  maxAmount     Decimal?          @map("max_amount") @db.Decimal(18, 2)
+  /// How the schedule names this line, e.g. the regulation it comes from.
+  label         String?
+  effectiveFrom DateTime          @map("effective_from")
+  /// Open-ended when null (applies to every contravention on or after `effectiveFrom`).
+  effectiveTo   DateTime?         @map("effective_to")
+  createdById   String?           @map("created_by_id") @db.Uuid
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  deletedAt     DateTime?         @map("deleted_at")
+
+  cases EnforcementCase[]
+
+  @@index([reason, entityType])
+  @@index([effectiveFrom])
+  @@index([deletedAt])
+  @@map("penalty_rules")
+}
+
+/// The allowlist of figures NCA has decided may be published (Q4).
+///
+/// Q4 draws a hard line: public data is aggregated and sector-level; operator-level
+/// commercially sensitive figures are never published. That line is a policy
+/// decision, so it is held as data an administrator maintains rather than a list
+/// coded into the portal. The default is that nothing is published — a question
+/// becomes public only when somebody deliberately adds it here.
+///
+/// The public label is stored separately from the questionnaire's own label on
+/// purpose: what an operator is asked and what a citizen should read are different
+/// sentences, and a wording change on the form must not silently rewrite the
+/// public site.
+model PublicIndicator {
+  id          String            @id @default(uuid()) @db.Uuid
+  /// The questionnaire question this publishes, by key. Matched by key rather than
+  /// id so republishing a new version of a questionnaire keeps the series intact.
+  fieldKey    String            @map("field_key")
+  /// How it is rolled up across operators.
+  aggregation PublicAggregation @default(SUM)
+  /// What the public sees. Never the internal field label.
+  label       String
+  unit        String?
+  /// A sentence of context for a reader who is not a regulator.
+  description String?
+  /// Ordering on the public page; lower comes first.
+  order       Int               @default(0)
+  /// Off by default, so adding a line and publishing it are two separate decisions.
+  isPublished Boolean           @default(false) @map("is_published")
+  createdById String?           @map("created_by_id") @db.Uuid
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  deletedAt   DateTime?         @map("deleted_at")
+
+  @@unique([fieldKey, aggregation])
+  @@index([isPublished])
+  @@index([deletedAt])
+  @@map("public_indicators")
+}
+
+/// A report NCA has asked the portal to build and send on a timetable (Phase 2).
+///
+/// Recipients are Authority users held by id, never free-text addresses. A
+/// regulator's reports carry sector figures, and an address box on a form is one
+/// typo away from sending them outside the building; picking from the staff list
+/// also means a leaver stops receiving reports when their account is closed
+/// rather than when somebody remembers.
+model ReportSchedule {
+  id          String              @id @default(uuid()) @db.Uuid
+  name        String
+  kind        ScheduledReportKind @default(COMPLIANCE_WORKBOOK)
+  frequency   ReportFrequency     @default(MONTHLY)
+  /// Day of the month it goes out (1-28), or day of the week for a weekly report
+  /// (1 = Monday). Capped at 28 so a monthly report exists in February too.
+  dayOfPeriod Int                 @default(1) @map("day_of_period")
+  /// Hour of day, 0-23, in the server's timezone.
+  hour        Int                 @default(7)
+  isEnabled   Boolean             @default(true) @map("is_enabled")
+  /// When it last went out. Also the guard against sending twice in one window.
+  lastRunAt   DateTime?           @map("last_run_at")
+  lastError   String?             @map("last_error")
+  createdById String?             @map("created_by_id") @db.Uuid
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  deletedAt   DateTime?           @map("deleted_at")
+
+  recipients ReportRecipient[]
+
+  @@index([isEnabled])
+  @@index([deletedAt])
+  @@map("report_schedules")
+}
+
+/// One person on a report's distribution list.
+model ReportRecipient {
+  id         String @id @default(uuid()) @db.Uuid
+  scheduleId String @map("schedule_id") @db.Uuid
+  userId     String @map("user_id") @db.Uuid
+
+  schedule ReportSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user     User           @relation("ReportRecipient", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, userId])
+  @@index([userId])
+  @@map("report_recipients")
+}
+
+/// A point on an operator's network: a mast, a fibre node, an exchange (Phase 2).
+///
+/// Until now coverage and fibre arrived as KML/KMZ attachments on a return, which
+/// the Authority could store but not query — you cannot ask a file where the
+/// nearest base station is. This is the structured half: one row per site, with
+/// coordinates, so the same information can be mapped, counted and compared.
+/// The attachments stay; they are the operator's own submitted artefact.
+///
+/// Coordinates are stored to six decimal places, which is roughly a tenth of a
+/// metre, and comfortably beyond the accuracy anyone reports a mast to.
+model NetworkSite {
+  id             String            @id @default(uuid()) @db.Uuid
+  entityId       String            @map("entity_id") @db.Uuid
+  /// Operator-assigned reference. Unique within the owning operator, so an
+  /// operator can re-import its own register without creating duplicates.
+  siteReference  String            @map("site_reference")
+  name           String
+  kind           NetworkSiteKind   @default(BASE_STATION)
+  status         NetworkSiteStatus @default(ACTIVE)
+  latitude       Decimal           @db.Decimal(9, 6)
+  longitude      Decimal           @db.Decimal(9, 6)
+  /// Free-text place name, for a reader who wants words rather than coordinates.
+  location       String?
+  /// Technology carried, as a TECHNOLOGY reference code (e.g. "4G").
+  technology     String?
+  /// Approximate coverage radius in metres, where the operator reports one.
+  coverageM      Int?              @map("coverage_m")
+  commissionedAt DateTime?         @map("commissioned_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  deletedAt      DateTime?         @map("deleted_at")
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, siteReference])
+  @@index([entityId])
+  @@index([kind])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("network_sites")
+}
+
+/// A machine credential for an operator's own systems (Q10, Phase 3).
+///
+/// Q10 lists the controls this has to carry: mutual TLS, per-operator
+/// credentials, token auth, IP allow-listing, signed payloads, rate limiting and
+/// full audit logging. Each one is a column here or a check in the guard, rather
+/// than a deployment note somebody has to remember.
+///
+/// The secret is stored only as a hash, exactly like a password: it is shown once
+/// when issued and never again. `secretLast4` exists so a person looking at two
+/// credentials can tell which is which without being able to reconstruct either.
+model ApiClient {
+  id          String @id @default(uuid()) @db.Uuid
+  entityId    String @map("entity_id") @db.Uuid
+  /// What this credential is for, in the operator's own words.
+  name        String
+  /// The public half. Sent on every request; safe to log.
+  clientId    String @unique @map("client_id")
+  /// bcrypt of the secret. The secret itself is never persisted.
+  secretHash  String @map("secret_hash")
+  /// Last four characters of the secret, to tell two credentials apart on screen.
+  secretLast4 String @map("secret_last4")
+
+  /// SHA-256 fingerprint of the client certificate, lower-case hex, no colons.
+  /// When set, a request must present exactly this certificate (Q10: mutual TLS).
+  certFingerprint    String?    @map("cert_fingerprint")
+  /// CIDR blocks this credential may call from. Empty means no restriction, which
+  /// the UI warns about rather than silently allowing.
+  allowedCidrs       String[]   @map("allowed_cidrs")
+  scopes             ApiScope[]
+  /// Requests per minute for this credential, on top of the global throttle.
+  rateLimitPerMinute Int        @default(60) @map("rate_limit_per_minute")
+
+  status     ApiClientStatus @default(ACTIVE)
+  /// Credentials expire by default. A key that lives forever is a key nobody rotates.
+  expiresAt  DateTime?       @map("expires_at")
+  lastUsedAt DateTime?       @map("last_used_at")
+  /// Set when the credential is revoked, so the trail survives the revocation.
+  revokedAt  DateTime?       @map("revoked_at")
+
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  /// The non-interactive account this credential files as, so every submission has
+  /// an author and the audit trail names the integration rather than a blank.
+  serviceUserId String @unique @map("service_user_id") @db.Uuid
+
+  entity      Entity     @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  serviceUser User       @relation("ApiClientServiceUser", fields: [serviceUserId], references: [id], onDelete: Restrict)
+  nonces      ApiNonce[]
+
+  @@index([entityId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("api_clients")
+}
+
+/// One request signature already spent, held until its timestamp window closes.
+///
+/// A signature that can be replayed is not a signature. The unique index is what
+/// actually enforces single use: two identical requests racing each other both
+/// pass the timestamp check, and the second one loses the insert.
+model ApiNonce {
+  id        String   @id @default(uuid()) @db.Uuid
+  clientId  String   @map("client_id") @db.Uuid
+  nonce     String
+  /// When this row stops being useful and can be swept away.
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  client ApiClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, nonce])
+  @@index([expiresAt])
+  @@map("api_nonces")
+}
+
+/// The formal data-sharing agreement a feed runs under (Q10, Phase 3).
+///
+/// Q10 says each feed is governed by a formal agreement. That is not a note in a
+/// filing cabinet here: a feed whose agreement is not in force does not run, and
+/// the engine checks that on every single pull rather than when the feed was set
+/// up. An agreement that lapses stops the data arriving the same day, which is the
+/// behaviour a lawyer would expect and the one an engineer has to build.
+model DataSharingAgreement {
+  id        String          @id @default(uuid()) @db.Uuid
+  entityId  String          @map("entity_id") @db.Uuid
+  /// The Authority's own reference for the signed instrument.
+  reference String          @unique
+  title     String
+  /// What the operator has agreed NCA may collect, in the agreement's own words.
+  scope     String?
+  status    AgreementStatus @default(DRAFT)
+  signedAt  DateTime?       @map("signed_at")
+  startsAt  DateTime        @map("starts_at")
+  /// Open-ended when null. An agreement with no end date is a deliberate choice,
+  /// and the screen says so.
+  endsAt    DateTime?       @map("ends_at")
+
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  entity Entity        @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  feeds  NetworkFeed[]
+
+  @@index([entityId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("data_sharing_agreements")
+}
+
+/// An automated metric pull from an operator's own system (Q10, Phase 3).
+///
+/// NCA calls out to the operator rather than waiting to be pushed to, because a
+/// pull is the half the regulator controls: it happens on NCA's schedule, it can
+/// be stopped from NCA's side, and a silent operator shows up as a failed run
+/// rather than as nothing at all.
+///
+/// Calling out from a server is also how an internal network gets probed from the
+/// outside, so the URL is checked against the rules in `feed-url.ts` before every
+/// request, not only when it is saved.
+model NetworkFeed {
+  id          String        @id @default(uuid()) @db.Uuid
+  agreementId String        @map("agreement_id") @db.Uuid
+  name        String
+  /// HTTPS endpoint on the operator's side. Verified before every call.
+  url         String
+  frequency   FeedFrequency @default(DAILY)
+  /// Hour of day for a daily or weekly pull, 0-23.
+  hour        Int           @default(3)
+  /// Day of the week for a weekly pull (1 = Monday).
+  dayOfWeek   Int           @default(1) @map("day_of_week")
+  isEnabled   Boolean       @default(true) @map("is_enabled")
+
+  /// Bearer token the operator issued to NCA, if their endpoint needs one. Stored
+  /// encrypted at rest by the deployment (Q5), never returned by any read.
+  authToken   String?         @map("auth_token")
+  lastRunAt   DateTime?       @map("last_run_at")
+  lastOutcome FeedRunOutcome? @map("last_outcome")
+  lastError   String?         @map("last_error")
+
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  agreement DataSharingAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  runs      FeedRun[]
+
+  @@index([agreementId])
+  @@index([isEnabled])
+  @@index([deletedAt])
+  @@map("network_feeds")
+}
+
+/// One attempt at a feed, kept whether it worked or not.
+///
+/// The failures are the point. A feed that quietly stopped returning data is the
+/// failure mode that matters, and it is invisible unless every attempt leaves a row.
+model FeedRun {
+  id          String         @id @default(uuid()) @db.Uuid
+  feedId      String         @map("feed_id") @db.Uuid
+  outcome     FeedRunOutcome
+  startedAt   DateTime       @default(now()) @map("started_at")
+  finishedAt  DateTime?      @map("finished_at")
+  /// How many metrics the response carried.
+  metricCount Int            @default(0) @map("metric_count")
+  /// HTTP status, where the call got far enough to have one.
+  httpStatus  Int?           @map("http_status")
+  message     String?
+
+  feed       NetworkFeed  @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  FeedMetric FeedMetric[]
+
+  @@index([feedId])
+  @@index([startedAt])
+  @@map("feed_runs")
+}
+
+/// One metric that arrived on a feed.
+///
+/// Deliberately not a Submission. A feed is telemetry an operator has agreed to
+/// share, not a return it has signed and filed, and treating the two as the same
+/// thing would let an unsigned number end up in a regulatory filing. The Authority
+/// reads these alongside returns; nothing here enters the workflow.
+model FeedMetric {
+  id         String   @id @default(uuid()) @db.Uuid
+  feedRunId  String   @map("feed_run_id") @db.Uuid
+  entityId   String   @map("entity_id") @db.Uuid
+  /// The metric's name as the operator's system reports it.
+  key        String
+  value      Decimal  @db.Decimal(20, 4)
+  unit       String?
+  /// When the measurement was taken, as reported by the operator.
+  measuredAt DateTime @map("measured_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  feedRun FeedRun @relation(fields: [feedRunId], references: [id], onDelete: Cascade)
+  entity  Entity  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId, key, measuredAt])
+  @@index([feedRunId])
+  @@map("feed_metrics")
+}
+
+/// A signing certificate registered by a user, for certificate-based signatures
+/// (Q6, Phase 3).
+///
+/// Only the public half is ever held here. The private key stays with the signer,
+/// which is the entire point: a signature the portal could have produced itself
+/// proves nothing about who made it.
+///
+/// Certificates are retired rather than deleted. Returns signed years ago point at
+/// them, and a signature whose certificate has vanished can never be checked again.
+model SigningCertificate {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  /// What the signer calls it, e.g. "Finance director smart card".
+  label  String
+
+  /// SHA-256 of the DER bytes, lower-case hex. The stable identity of a certificate.
+  fingerprint    String                   @unique
+  subject        String
+  issuer         String
+  /// SPKI PEM, extracted on registration so verification never re-parses the chain.
+  publicKeyPem   String                   @map("public_key_pem")
+  /// The full PEM as supplied, kept so the certificate can be handed to anyone
+  /// wanting to check a signature without going through this portal at all.
+  certificatePem String                   @map("certificate_pem")
+  algorithm      String
+  notBefore      DateTime                 @map("not_before")
+  notAfter       DateTime                 @map("not_after")
+  /// True when the certificate signed itself. Recorded rather than refused: whether
+  /// NCA accepts self-signed certificates is a policy question, not a code one.
+  selfSigned     Boolean                  @default(false) @map("self_signed")
+  status         SigningCertificateStatus @default(ACTIVE)
+  revokedAt      DateTime?                @map("revoked_at")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+
+  user              User         @relation("UserSigningCertificates", fields: [userId], references: [id], onDelete: Cascade)
+  signedSubmissions Submission[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("signing_certificates")
+}
+
+/// Password reset tokens. Only the SHA-256 hash of the token is persisted;
+/// the raw token is delivered to the user and never stored.
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+/// A one-time-password challenge issued after a correct password, when MFA is
+/// on. Only the SHA-256 hash of the code is stored; the code is delivered out of
+/// band (SMS/email — currently a static demo code logged to the console). The
+/// JWT is issued only after the code is verified.
+/// Proof that a phone number belongs to the person who typed it.
+///
+/// Separate from `OtpChallenge` on purpose. That one gates signing in; this one gates a contact
+/// detail, and the two have different lifetimes, different rate limits, and different consequences
+/// when they go wrong. Sharing a table would mean every change to one being reasoned about twice.
+model PhoneVerification {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  /// The number being proved, E.164. Held here rather than on the user until it is confirmed, so an
+  /// unproved number never sits in the contact field looking like a fact.
+  phone      String
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("phone_verifications")
+}
+
+model OtpChallenge {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  codeHash   String    @map("code_hash")
+  expiresAt  DateTime  @map("expires_at")
+  attempts   Int       @default(0)
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("otp_challenges")
+}
+
+/// Append-only audit trail. Records who did what, when, and from where.
+/// actorUserId is nullable so system/anonymous events can still be logged.
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  actorId    String?     @map("actor_id") @db.Uuid
+  action     AuditAction
+  entityType String?     @map("entity_type")
+  entityId   String?     @map("entity_id")
+  metadata   Json?
+  ipAddress  String?     @map("ip_address")
+  userAgent  String?     @map("user_agent")
+  /// Correlation id of the request that produced this record (X-Request-Id),
+  /// tying an audited action to the server logs for the same request.
+  requestId  String?     @map("request_id")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([requestId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
