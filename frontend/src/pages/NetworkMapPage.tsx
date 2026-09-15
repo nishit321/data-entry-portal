@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Plus, Radio, Trash2 } from 'lucide-react';
 import {
@@ -23,7 +24,8 @@ import {
 } from '../components/ui';
 import { DataTable, type Column } from '../components/DataTable';
 import { NetworkMap } from '../components/NetworkMap';
-import { MAP_KIND_COLOURS, MAP_KIND_LABELS } from '../components/map-legend';
+import { FibreRouteRegister } from '../components/FibreRouteRegister';
+import { MAP_KIND_COLOURS, MAP_KIND_LABELS, ROUTE_COLOUR } from '../components/map-legend';
 import { geoApi, geoKeys, type NetworkSiteInput } from '../lib/geo.api';
 import { entityPicker } from '../lib/pickers';
 import { getErrorMessage } from '../lib/api';
@@ -95,6 +97,7 @@ export function NetworkMapPage() {
   const [status, setStatus] = useState('');
   const [includeAgents, setIncludeAgents] = useState(true);
   const [showCoverage, setShowCoverage] = useState(true);
+  const [showRoutes, setShowRoutes] = useState(true);
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(BLANK);
@@ -125,6 +128,7 @@ export function NetworkMapPage() {
   });
 
   const points = useMemo(() => mapQuery.data?.points ?? [], [mapQuery.data]);
+  const routes = useMemo(() => mapQuery.data?.routes ?? [], [mapQuery.data]);
   const sites = listQuery.data?.data ?? [];
 
   // Only the layers actually on the map get a legend entry; a key to nothing is noise.
@@ -262,11 +266,11 @@ export function NetworkMapPage() {
 
         <div className="flex flex-wrap items-end gap-4">
           {canFilterEntity && (
-            <FilterField label="Operator" width="lg">
+            <FilterField label={strings.field.operator} width="lg">
               <Combobox
-                aria-label="Filter by operator"
+                aria-label={strings.filter.byOperator}
                 emptyLabel="All operators"
-                placeholder="Search operators…"
+                placeholder={strings.search.operators}
                 source={entityPicker}
                 value={entityId}
                 onChange={setEntityId}
@@ -281,9 +285,9 @@ export function NetworkMapPage() {
               onChange={setKind}
             />
           </FilterField>
-          <FilterField label="Status" width="md">
+          <FilterField label={strings.field.status} width="md">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               options={STATUS_FILTER_OPTIONS}
               value={status}
               onChange={setStatus}
@@ -296,17 +300,31 @@ export function NetworkMapPage() {
               onChange={setShowCoverage}
               label="Show coverage rings"
             />
+            <Checkbox checked={showRoutes} onChange={setShowRoutes} label="Show fibre routes" />
           </div>
         </div>
 
         <Card>
           {mapQuery.isLoading ? (
             <Skeleton className="h-[28rem] w-full" />
-          ) : points.length === 0 ? (
-            <EmptyState
-              icon={MapPin}
-              message="Nothing to map yet. Add a site to the register, or record coordinates against your agents."
-            />
+          ) : points.length === 0 && routes.length === 0 ? (
+            /*
+             * The map is still drawn, with the guidance under it rather than instead of it.
+             *
+             * `NetworkMap` already centres on Juba for exactly this case — the comment on
+             * `DEFAULT_CENTRE` says so — and the page never let that happen, so an operator with no
+             * sites saw a grey box where the country should be. Two costs to that. Somebody about to
+             * type their first coordinates has nothing to check them against, and a basemap that was
+             * never configured looks identical to one that is: this screen showed the same empty box
+             * either way, which is how a missing tile server went unnoticed.
+             */
+            <>
+              <NetworkMap points={[]} showCoverage={false} className="mb-3" />
+              <EmptyState
+                icon={MapPin}
+                message="Nothing to map yet. Add a site to the register, or record coordinates against your agents."
+              />
+            </>
           ) : (
             <>
               <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-gray-600">
@@ -320,15 +338,43 @@ export function NetworkMapPage() {
                     {MAP_KIND_LABELS[k]}
                   </span>
                 ))}
-                <span className="ml-auto text-gray-500">
+                {showRoutes && routes.length > 0 && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="h-0.5 w-5 rounded"
+                      style={{ backgroundColor: ROUTE_COLOUR }}
+                      aria-hidden
+                    />
+                    Fibre route
+                  </span>
+                )}
+                {/*
+                  A second legend entry for the dashed line, and only when one is on the map.
+                  A reader who sees a dashed line has to be able to find out what it means without
+                  clicking it, and a key to a line style nobody is looking at is just noise.
+                */}
+                {showRoutes && routes.some((r) => !r.surveyed) && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="h-0 w-5 rounded border-t-2 border-dashed"
+                      style={{ borderColor: ROUTE_COLOUR }}
+                      aria-hidden
+                    />
+                    Straight line, not surveyed
+                  </span>
+                )}
+                <span className="ms-auto text-gray-500">
                   {joinMeta(
                     `${mapQuery.data?.counts.sites ?? 0} sites`,
                     includeAgents && `${mapQuery.data?.counts.agents ?? 0} agents`,
+                    showRoutes && `${mapQuery.data?.counts.routes ?? 0} routes`,
                   )}
                 </span>
               </div>
               <NetworkMap
                 points={points}
+                routes={routes}
+                showRoutes={showRoutes}
                 showCoverage={showCoverage}
                 listedIn={
                   includeAgents
@@ -369,6 +415,17 @@ export function NetworkMapPage() {
             />
           </div>
         </Card>
+
+        {/*
+          Under the site register, because a route needs nodes before it can join them. Filtered by
+          the same operator and status as everything above it, so the three panels on this page are
+          always three views of one thing.
+        */}
+        <FibreRouteRegister
+          entityId={mapParams.entityId}
+          status={mapParams.status}
+          canEdit={canManage}
+        />
       </div>
 
       <Modal open={open} title="Add a site" onClose={() => setOpen(false)}>
@@ -377,20 +434,22 @@ export function NetworkMapPage() {
             <Field label="Reference" htmlFor="site-ref" hint="Your own reference for this site.">
               <Input
                 id="site-ref"
+                placeholder="e.g. JUB-0142"
                 value={form.siteReference}
                 onChange={(e) => setForm({ ...form, siteReference: e.target.value })}
               />
             </Field>
-            <Field label="Name" htmlFor="site-name">
+            <Field label={strings.field.name} htmlFor="site-name">
               <Input
                 id="site-name"
+                placeholder="e.g. Juba Central"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </Field>
           </div>
           <div className="flex gap-4">
-            <Field label="Type" htmlFor="site-kind">
+            <Field label={strings.field.type} htmlFor="site-kind">
               <Select
                 aria-label="Site type"
                 options={KIND_OPTIONS}
@@ -398,7 +457,7 @@ export function NetworkMapPage() {
                 onChange={(k) => setForm({ ...form, kind: k as NetworkSiteKind })}
               />
             </Field>
-            <Field label="Status" htmlFor="site-status">
+            <Field label={strings.field.status} htmlFor="site-status">
               <Select
                 aria-label="Site status"
                 options={STATUS_OPTIONS}
@@ -411,6 +470,7 @@ export function NetworkMapPage() {
             <Field label="Latitude" htmlFor="site-lat" hint="Decimal degrees, e.g. 4.859363.">
               <Input
                 id="site-lat"
+                placeholder="e.g. 4.859363"
                 type="number"
                 step="0.000001"
                 value={form.latitude}
@@ -420,6 +480,7 @@ export function NetworkMapPage() {
             <Field label="Longitude" htmlFor="site-lng" hint="Decimal degrees, e.g. 31.571251.">
               <Input
                 id="site-lng"
+                placeholder="e.g. 31.571250"
                 type="number"
                 step="0.000001"
                 value={form.longitude}
@@ -430,6 +491,7 @@ export function NetworkMapPage() {
           <Field label="Place" htmlFor="site-place" hint="Optional, e.g. the town or district.">
             <Input
               id="site-place"
+              placeholder="e.g. Juba, Central Equatoria"
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
             />
@@ -438,6 +500,7 @@ export function NetworkMapPage() {
             <Field label="Technology" htmlFor="site-tech" hint="Optional, e.g. 4G.">
               <Input
                 id="site-tech"
+                placeholder="e.g. 4G"
                 value={form.technology}
                 onChange={(e) => setForm({ ...form, technology: e.target.value })}
               />
@@ -449,6 +512,7 @@ export function NetworkMapPage() {
             >
               <Input
                 id="site-cov"
+                placeholder="Radius in metres"
                 type="number"
                 min="0"
                 value={form.coverageM}
@@ -458,7 +522,7 @@ export function NetworkMapPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={create.isPending}

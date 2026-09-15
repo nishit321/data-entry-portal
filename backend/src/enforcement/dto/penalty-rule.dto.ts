@@ -46,6 +46,30 @@ export class CreatePenaltyRuleDto {
   @Max(MAX_AMOUNT)
   maxAmount?: number;
 
+  /**
+   * Floor on the total, for a line the Act states as "a percentage, minimum X".
+   *
+   * Tier 2 is exactly that shape: 0.2% of audited annual revenue, minimum SSP 50m. Without a floor
+   * a small operator's breach prices at almost nothing, which is not a deterrent.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'Give the minimum as an amount in SSP.' })
+  @Min(0, { message: 'A minimum cannot be negative.' })
+  minAmount?: number;
+
+  /**
+   * Percentage of the operator's audited annual revenue.
+   *
+   * Set this and the line is priced on the operator's size rather than on how long the default ran
+   * — which is how Tiers 2 and 3 are written. The fixed and daily amounts are then not used, since
+   * adding them would invent a penalty nobody wrote.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 }, { message: 'Give the share as a percentage, e.g. 0.2.' })
+  @Min(0, { message: 'A percentage cannot be negative.' })
+  @Max(100, { message: 'A percentage cannot exceed 100.' })
+  percentOfRevenue?: number;
+
   @IsOptional()
   @IsString()
   @MaxLength(200)

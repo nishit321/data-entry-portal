@@ -51,6 +51,21 @@ test('is coherent whether or not a gateway is configured', async ({ page }) => {
   }
 });
 
+test('offers the authenticator app, or explains why it cannot', async ({ page }) => {
+  await page.goto('/profile');
+
+  const notice = page.getByText(/Authenticator apps are not set up/);
+  const setUp = page.getByRole('button', { name: 'Set up an authenticator app' });
+
+  // Same rule as the SMS card: never offer an action the server cannot perform. Which state this
+  // machine is in depends on whether TOTP_ENCRYPTION_KEY is set, so both are asserted.
+  if (await notice.isVisible()) {
+    await expect(setUp).toBeDisabled();
+  } else {
+    await expect(setUp).toBeEnabled();
+  }
+});
+
 test('has no accessibility violations', async ({ page }) => {
   await page.goto('/profile');
   await page.waitForLoadState('networkidle');

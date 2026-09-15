@@ -61,6 +61,11 @@ enum AuditAction {
   REFERENCE_ITEM_CREATED
   REFERENCE_ITEM_UPDATED
   REFERENCE_ITEM_DELETED
+  USER_MFA_RESET_BY_ADMIN
+  USER_TOTP_ENROLLED
+  USER_TOTP_DISABLED
+  USER_TOTP_RECOVERY_USED
+  USER_TOTP_RECOVERY_REGENERATED
   USER_PHONE_CHALLENGED
   USER_PHONE_VERIFIED
   USER_PHONE_REMOVED
@@ -112,6 +117,9 @@ enum AuditAction {
   NETWORK_SITE_CREATED
   NETWORK_SITE_UPDATED
   NETWORK_SITE_DELETED
+  FIBRE_LINK_CREATED
+  FIBRE_LINK_UPDATED
+  FIBRE_LINK_DELETED
   API_CLIENT_CREATED
   API_CLIENT_UPDATED
   API_CLIENT_REVOKED
@@ -129,11 +137,18 @@ enum AuditAction {
   FEED_DELETED
   FEED_RUN
   ENFORCEMENT_PENALTY_ASSESSED
+  /// The non-financial sanctions. Drafting one is not the same act as approving it, and the
+  /// approval is the one an operator will contest, so the two are recorded separately.
+  ENFORCEMENT_ORDER_DRAFTED
+  ENFORCEMENT_ORDER_APPROVED
+  ENFORCEMENT_ORDER_REVOKED
   DOCUMENT_UPLOADED
   DOCUMENT_REPLACED
   DOCUMENT_DELETED
   COMPLAINT_FILED
   COMPLAINT_STATUS_CHANGED
+  COMPLAINT_ATTACHMENT_UPLOADED
+  COMPLAINT_ATTACHMENT_REMOVED
   SUBMISSION_BULK_UPLOADED
 
   @@map("audit_action")
@@ -219,6 +234,7 @@ enum NotificationType {
   DOCUMENT_EXPIRING // to the operator: a licence/certificate is approaching its expiry date
   DOCUMENT_EXPIRED // to the operator: a licence/certificate has passed its expiry date
   COMPLAINT_RECEIVED // to the Authority: a citizen has filed a complaint or suggestion
+  SECURITY_MFA_RESET // to the user: an administrator removed their authenticator app
 
   @@map("notification_type")
 }
@@ -259,6 +275,25 @@ enum ReportFrequency {
   QUARTERLY
 
   @@map("report_frequency")
+}
+
+/// What period a scheduled report covers when it goes out (NCA, 15 September 2026).
+///
+/// A recurring report needs a window worked out at send time, not a date fixed once when somebody
+/// set the schedule up. Which window depends on what the report is for, and the two answers are
+/// genuinely different reports rather than a preference:
+///
+///   - A levy statement is about a period that is finished. Sending one for a quarter still open
+///     would state an amount that has not settled.
+///   - A compliance report is about who has filed and who has not, which is a question about the
+///     period that is open right now. Sending one for a closed period would chase nobody.
+enum ReportCoverage {
+  /// The most recently closed reporting period, whatever it is on the day the report goes out.
+  LAST_CLOSED_PERIOD
+  /// Wherever the figures stand when the report is built. No period is fixed.
+  LATEST_ACTIVITY
+
+  @@map("report_coverage")
 }
 
 /// What a mapped point on the network is. Kept to the kinds NCA already collects
@@ -422,6 +457,33 @@ enum EnforcementStatus {
   @@map("enforcement_status")
 }
 
+/// The non-financial sanctions in Tier 3 of NCA's schedule (NCA, 3 September 2026).
+///
+/// "Record as a formal enforcement order on the case — type (suspension full/partial,
+/// cancellation, or licence-shortening), reason, legal basis, effective date and duration."
+///
+/// These are not amounts, which is why they are not in the penalty schedule: a licence being
+/// suspended is a decision, and a decision has a author, a legal basis and a date rather than a
+/// figure.
+enum EnforcementOrderType {
+  SUSPENSION_FULL
+  SUSPENSION_PARTIAL
+  CANCELLATION
+  LICENCE_SHORTENING
+
+  @@map("enforcement_order_type")
+}
+
+enum EnforcementOrderStatus {
+  /// Drafted by an officer. Carries no effect at all until it is approved.
+  DRAFT
+  APPROVED
+  /// Withdrawn after approval. Kept, never deleted — it had legal effect while it stood.
+  REVOKED
+
+  @@map("enforcement_order_status")
+}
+
 /// Lifecycle of a questionnaire template. DRAFT is editable; PUBLISHED is locked
 /// and used by reporting periods/submissions; ARCHIVED is a superseded version.
 enum TemplateStatus {
@@ -512,26 +574,38 @@ enum EntityStatus {
 // ---------------------------------------------------------------------------
 
 model User {
-  id                  String    @id @default(uuid()) @db.Uuid
-  email               String    @unique
-  passwordHash        String    @map("password_hash")
-  firstName           String    @map("first_name")
-  lastName            String    @map("last_name")
-  role                Role      @default(OPERATOR_SUBMITTER)
-  isActive            Boolean   @default(true) @map("is_active")
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  passwordHash     String    @map("password_hash")
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
+  role             Role      @default(OPERATOR_SUBMITTER)
+  isActive         Boolean   @default(true) @map("is_active")
   /// A non-interactive account that exists only so a machine credential's filings
   /// have an author (Q10, Phase 3). It carries no usable password, is refused at
   /// every login path, and is hidden from the team screens — it is a name in the
   /// audit trail, not a person. Created and retired with its ApiClient.
-  isServiceAccount    Boolean   @default(false) @map("is_service_account")
+  isServiceAccount Boolean   @default(false) @map("is_service_account")
   /// The regulated entity this user belongs to. Null for Authority-internal
   /// roles (ADMIN/SUPERVISOR/ANALYST/reviewers) and public CITIZEN users.
   /// This column anchors data segregation: an operator user only ever sees
   /// data scoped to their entityId.
-  entityId            String?   @map("entity_id") @db.Uuid
+  entityId         String?   @map("entity_id") @db.Uuid
   /// Multi-factor authentication toggle. On by default; a login requires an OTP
   /// challenge to be verified before a token is issued (see OtpChallenge).
-  mfaEnabled          Boolean   @default(true) @map("mfa_enabled")
+  mfaEnabled       Boolean   @default(true) @map("mfa_enabled")
+  /// The TOTP shared secret, encrypted at rest (see `common/utils/secret-box.util.ts`). Encrypted
+  /// rather than hashed because the server has to reproduce it on every sign-in; the key lives
+  /// outside the database so a stolen dump does not defeat everybody's second factor at once.
+  totpSecret       String?   @map("totp_secret")
+  /// When the authenticator app was confirmed. Null means not in use: a secret may exist from an
+  /// enrolment that was never finished, and an unconfirmed secret must never gate a sign-in.
+  totpConfirmedAt  DateTime? @map("totp_confirmed_at")
+  /// The last 30-second step accepted for this user. A valid code is valid for its whole window,
+  /// so without this the same six digits work twice, and anyone who reads them over a shoulder
+  /// has half a minute to use them.
+  totpLastStep     Int?      @map("totp_last_step")
+
   /// E.164, e.g. +211920000000. Optional: SMS is a second way of reaching somebody, never the only
   /// one, so an account without a number works exactly as it always did.
   phone               String?
@@ -554,6 +628,7 @@ model User {
   resetTokens              PasswordResetToken[]
   otpChallenges            OtpChallenge[]
   phoneVerifications       PhoneVerification[]
+  totpRecoveryCodes        TotpRecoveryCode[]
   auditLogs                AuditLog[]
   signedSubmissions        Submission[]         @relation("SubmissionSignedBy")
   notifications            Notification[]       @relation("UserNotifications")
@@ -564,6 +639,10 @@ model User {
   apiCredential            ApiClient?           @relation("ApiClientServiceUser")
   signingCertificates      SigningCertificate[] @relation("UserSigningCertificates")
 
+
+  draftedOrders  EnforcementOrder[] @relation("OrderDraftedBy")
+  approvedOrders EnforcementOrder[] @relation("OrderApprovedBy")
+  revokedOrders  EnforcementOrder[] @relation("OrderRevokedBy")
   @@index([role])
   @@index([isActive])
   @@index([entityId])
@@ -602,6 +681,7 @@ model Entity {
   documents        DocumentRecord[]
   complaints       Complaint[]
   networkSites     NetworkSite[]
+  fibreLinks       FibreLink[]
   apiClients       ApiClient[]
   agreements       DataSharingAgreement[]
   feedMetrics      FeedMetric[]
@@ -789,6 +869,14 @@ model ReportingPeriod {
   dueDate     DateTime           @map("due_date")
   /// Working days accepted after the due date before a return is non-compliant.
   graceDays   Int                @default(5) @map("grace_days")
+  /// SSP per USD for this cycle, and the date the Authority set it from.
+  ///
+  /// Held on the period rather than as one current rate, at NCA's instruction: a single rate
+  /// updated in place would silently restate every prior year's audited USD figures the moment
+  /// somebody entered today's number. A period's rate can still be changed, but only by opening
+  /// that period and doing it deliberately — and the change is audited like any other.
+  usdRate     Decimal?           @map("usd_rate") @db.Decimal(18, 4)
+  usdRateAt   DateTime?          @map("usd_rate_at")
   status      PeriodStatus       @default(OPEN)
   openedAt    DateTime?          @map("opened_at")
   closedAt    DateTime?          @map("closed_at")
@@ -1047,6 +1135,21 @@ model EnforcementCase {
   /// When the default ended, because the return finally arrived. Accrual stops here.
   defaultEndedAt    DateTime? @map("default_ended_at")
 
+  /// The statutory remedy notice, and when it runs out (NCA, 3 September 2026).
+  ///
+  /// The Act requires thirty days' notice before any financial penalty. NCA's instruction on how
+  /// that meets the accrual is precise, and worth keeping in front of whoever reads this next: the
+  /// penalty runs **from the original late date, after the grace window**, but is only *assessed*
+  /// once the remedy period lapses unremedied. "Nothing is payable during the 30 days, but a
+  /// defaulter doesn't get a free month either."
+  ///
+  /// These two dates gate when a figure becomes payable. They do not move `defaultStartedAt`,
+  /// which is what the figure is calculated from.
+  remedyNoticeAt    DateTime? @map("remedy_notice_at")
+  remedyDueAt       DateTime? @map("remedy_due_at")
+
+  orders EnforcementOrder[]
+
   // A case is a child record of its entity and period — it cannot outlive them. (In production
   // entities/periods are soft-deleted, never removed, so this cascade only matters to test teardown.)
   entity      Entity          @relation(fields: [entityId], references: [id], onDelete: Cascade)
@@ -1063,6 +1166,58 @@ model EnforcementCase {
   @@index([periodId])
   @@index([penaltyRuleId])
   @@map("enforcement_cases")
+}
+
+/// A formal enforcement order: the non-financial half of Tier 3 (NCA, 3 September 2026).
+///
+/// NCA's instruction, verbatim, because every field below comes from it: "record as a formal
+/// enforcement order on the case — type (suspension full/partial, cancellation, or
+/// licence-shortening), reason, legal basis, effective date and duration. Sign-off escalates
+/// beyond the officer chain: DG approves a suspension; the Board approves a cancellation."
+///
+/// **Why the Board is a reference and not a role.** A Board is a body that meets and minutes its
+/// decisions; it does not hold a login. Inventing a `BOARD` account would put the most serious
+/// sanction the Authority can impose behind a shared password, and would record the officer who
+/// typed it as the person who decided it. So a cancellation carries the minute that authorised it
+/// — `boardMinuteRef` and `boardDecidedAt` — and the portal refuses to approve one without them.
+/// The officer is still recorded as who entered it, which is a different and equally necessary fact.
+model EnforcementOrder {
+  id     String                 @id @default(uuid()) @db.Uuid
+  caseId String                 @map("case_id") @db.Uuid
+  type   EnforcementOrderType
+  status EnforcementOrderStatus @default(DRAFT)
+
+  /// Why the Authority is doing this, in words an operator and a court can both read.
+  reason String
+  /// The section of the Act it rests on. An order without one is not enforceable.
+  legalBasis String @map("legal_basis")
+  /// When it takes effect. Not the same as when it was approved — notice periods exist.
+  effectiveFrom DateTime @map("effective_from")
+  /// How long it runs. Null for a cancellation, which does not end.
+  durationDays Int? @map("duration_days")
+
+  /// The Board minute that authorised a cancellation. Required for that type and no other.
+  boardMinuteRef String?   @map("board_minute_ref")
+  boardDecidedAt DateTime? @map("board_decided_at")
+
+  draftedById  String    @map("drafted_by_id") @db.Uuid
+  approvedById String?   @map("approved_by_id") @db.Uuid
+  approvedAt   DateTime? @map("approved_at")
+  revokedById  String?   @map("revoked_by_id") @db.Uuid
+  revokedAt    DateTime? @map("revoked_at")
+  revokedNote  String?   @map("revoked_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  case       EnforcementCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  draftedBy  User            @relation("OrderDraftedBy", fields: [draftedById], references: [id], onDelete: Restrict)
+  approvedBy User?           @relation("OrderApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  revokedBy  User?           @relation("OrderRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  @@index([caseId])
+  @@index([status])
+  @@map("enforcement_orders")
 }
 
 /// An entity's licence, certificate, or supporting document. Versioned rather than
@@ -1146,14 +1301,49 @@ model Complaint {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  aboutEntity Entity? @relation(fields: [aboutEntityId], references: [id], onDelete: SetNull)
-  handledBy   User?   @relation("ComplaintHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+  aboutEntity Entity?               @relation(fields: [aboutEntityId], references: [id], onDelete: SetNull)
+  handledBy   User?                 @relation("ComplaintHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+  attachments ComplaintAttachment[]
 
   @@index([status])
   @@index([category])
   @@index([aboutEntityId])
   @@index([createdAt])
   @@map("complaints")
+}
+
+/// Evidence a member of the public attached to their complaint (NCA, 15 September 2026): a photo
+/// of a fault, a bill, a screenshot of a message.
+///
+/// Three things separate this from SubmissionAttachment, and they are why it is its own table
+/// rather than a nullable column on that one:
+///
+///   - There is no uploader. The filer may be anonymous, and even a named one has no account, so
+///     there is nobody to reference. The tracking code is what authorises the upload.
+///   - It is never served back to the public. The citizen is told their file arrived and nothing
+///     more; only the Authority can open it. A file that arrived over an unauthenticated route and
+///     can be fetched over one is an open file host.
+///   - The accepted formats are narrower. A complaint takes a photo or a document, not the
+///     geospatial and spreadsheet formats a licensed operator files returns in.
+model ComplaintAttachment {
+  id          String @id @default(uuid()) @db.Uuid
+  complaintId String @map("complaint_id") @db.Uuid
+  fileName    String @map("file_name")
+  /// Derived from the validated extension, never the type the uploader claimed. On a public route
+  /// the declared type is just another field the sender controls.
+  mimeType    String @map("mime_type")
+  sizeBytes   Int    @map("size_bytes")
+  /// Opaque key the storage backend uses to fetch the blob (never the original name).
+  storageKey  String @map("storage_key")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  complaint Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+
+  @@index([complaintId])
+  @@index([deletedAt])
+  @@map("complaint_attachments")
 }
 
 /// A regulatory levy rate that applies over a date window (Q14). The levy owed by an operator is
@@ -1197,6 +1387,19 @@ model PenaltyRule {
   dailyAmount   Decimal           @default(0) @map("daily_amount") @db.Decimal(18, 2)
   /// Ceiling on the total. Uncapped when null.
   maxAmount     Decimal?          @map("max_amount") @db.Decimal(18, 2)
+  /// Floor on the total, for the tiers the Act states as "a percentage, minimum X".
+  minAmount     Decimal?          @map("min_amount") @db.Decimal(18, 2)
+  /// Percentage of the operator's audited annual revenue (NCA, 3 September 2026).
+  ///
+  /// Tiers 2 and 3 of the schedule are not fixed sums: QoS is "0.2% of audited annual revenue,
+  /// minimum SSP 50m", and serious conduct is "up to 10% of gross annual revenue". A schedule that
+  /// can only hold absolute amounts cannot state either of them, so the line could not be recorded
+  /// at all — let alone applied.
+  ///
+  /// The figure it multiplies is the revenue on the operator's **annual** return, which
+  /// VALIDATION_SPEC §4.1 already defines as entered from audited accounts rather than summed from
+  /// the quarters. Until that return exists, a percentage line has no amount and the case says so.
+  percentOfRevenue Decimal?       @map("percent_of_revenue") @db.Decimal(7, 4)
   /// How the schedule names this line, e.g. the regulation it comes from.
   label         String?
   effectiveFrom DateTime          @map("effective_from")
@@ -1266,6 +1469,8 @@ model ReportSchedule {
   name        String
   kind        ScheduledReportKind @default(COMPLIANCE_WORKBOOK)
   frequency   ReportFrequency     @default(MONTHLY)
+  /// Which period this report covers, worked out each time it goes out rather than fixed here.
+  coverage    ReportCoverage      @default(LAST_CLOSED_PERIOD)
   /// Day of the month it goes out (1-28), or day of the week for a weekly report
   /// (1 = Monday). Capped at 28 so a monthly report exists in February too.
   dayOfPeriod Int                 @default(1) @map("day_of_period")
@@ -1333,7 +1538,9 @@ model NetworkSite {
   updatedAt      DateTime          @updatedAt @map("updated_at")
   deletedAt      DateTime?         @map("deleted_at")
 
-  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  entity        Entity      @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  linksFromHere FibreLink[] @relation("FibreLinkFrom")
+  linksToHere   FibreLink[] @relation("FibreLinkTo")
 
   @@unique([entityId, siteReference])
   @@index([entityId])
@@ -1341,6 +1548,55 @@ model NetworkSite {
   @@index([status])
   @@index([deletedAt])
   @@map("network_sites")
+}
+
+/// A fibre route between two nodes on the register (NCA, 15 September 2026).
+///
+/// "Network Map: Display the complete fiber route."
+///
+/// The map plots points; a route is the line between two of them, and it lives here rather than
+/// being read out of the KML and OFDS files operators attach to returns. NCA chose the register:
+/// the map shows the network as it stands today, and a route read from a filed attachment would
+/// show it as it was for one reporting period. The two have different lifecycles and mixing them
+/// would leave nobody able to say which they were looking at.
+///
+/// `path` is what makes the word "complete" true. Fibre follows roads and rivers, so the straight
+/// line between two nodes is not the route — it is a guess at one. An operator that has the
+/// geometry supplies it and the map draws the real thing; an operator that has not yet gets the
+/// straight line, and the map says so rather than implying a survey nobody did.
+model FibreLink {
+  id            String            @id @default(uuid()) @db.Uuid
+  entityId      String            @map("entity_id") @db.Uuid
+  /// Operator-assigned reference, unique within the owning operator so a re-import
+  /// updates a route rather than laying a second one alongside it.
+  linkReference String            @map("link_reference")
+  name          String
+  status        NetworkSiteStatus @default(ACTIVE)
+  fromSiteId    String            @map("from_site_id") @db.Uuid
+  toSiteId      String            @map("to_site_id") @db.Uuid
+  /// Route length in kilometres as the operator reports it. Longer than the straight-line
+  /// distance, usually by a lot, because cable follows roads: it is the figure that matters
+  /// for capacity planning and it cannot be derived from the two endpoints.
+  lengthKm      Decimal?          @map("length_km") @db.Decimal(10, 3)
+  /// Lit capacity in Gbit/s, where the operator reports one.
+  capacityGbps  Int?              @map("capacity_gbps")
+  /// The route itself: an ordered list of [latitude, longitude] pairs from one end to the
+  /// other, or null when the operator has only told us which two nodes are joined.
+  path          Json?
+  commissionedAt DateTime?        @map("commissioned_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  deletedAt     DateTime?         @map("deleted_at")
+
+  entity   Entity      @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  fromSite NetworkSite @relation("FibreLinkFrom", fields: [fromSiteId], references: [id], onDelete: Cascade)
+  toSite   NetworkSite @relation("FibreLinkTo", fields: [toSiteId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, linkReference])
+  @@index([entityId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("fibre_links")
 }
 
 /// A machine credential for an operator's own systems (Q10, Phase 3).
@@ -1615,6 +1871,25 @@ model PasswordResetToken {
 /// on. Only the SHA-256 hash of the code is stored; the code is delivered out of
 /// band (SMS/email — currently a static demo code logged to the console). The
 /// JWT is issued only after the code is verified.
+/// A way back in when the phone with the authenticator app is lost, stolen or wiped.
+///
+/// Without these, losing a handset means losing the account, and the only route back is somebody at
+/// the Authority turning the second factor off by hand — which is both a support burden and a
+/// social-engineering target. Each code works once. They are hashed, like passwords, because
+/// nothing ever needs to read them back.
+model TotpRecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("totp_recovery_codes")
+}
+
 /// Proof that a phone number belongs to the person who typed it.
 ///
 /// Separate from `OtpChallenge` on purpose. That one gates signing in; this one gates a contact
@@ -1639,10 +1914,24 @@ model PhoneVerification {
   @@map("phone_verifications")
 }
 
+/// Which second factor a sign-in challenge is waiting on.
+enum MfaMethod {
+  /// A code generated by the server and emailed to the account.
+  EMAIL
+  /// A code from the user's authenticator app, or one of their recovery codes. Nothing is sent:
+  /// the code already exists on a device the server never talks to.
+  TOTP
+
+  @@map("mfa_method")
+}
+
 model OtpChallenge {
   id         String    @id @default(uuid()) @db.Uuid
   userId     String    @map("user_id") @db.Uuid
-  codeHash   String    @map("code_hash")
+  /// Which factor this challenge is waiting on, so the audit trail says how somebody got in.
+  method     MfaMethod @default(EMAIL)
+  /// The hash of the emailed code. Null for a TOTP challenge, where the server issues nothing.
+  codeHash   String?   @map("code_hash")
   expiresAt  DateTime  @map("expires_at")
   attempts   Int       @default(0)
   consumedAt DateTime? @map("consumed_at")
@@ -1660,6 +1949,13 @@ model OtpChallenge {
 model AuditLog {
   id         String      @id @default(uuid()) @db.Uuid
   actorId    String?     @map("actor_id") @db.Uuid
+  /// Who acted, copied onto the record when it is written.
+  ///
+  /// Not a duplicate of the join. `actor_id` is set to null when an account is hard-deleted, and
+  /// a joined name shows who that person is *now* rather than who they were at the time. An audit
+  /// record has to answer "who did this" on its own, years later, with the account long gone.
+  actorEmail String?     @map("actor_email")
+  actorName  String?     @map("actor_name")
   action     AuditAction
   entityType String?     @map("entity_type")
   entityId   String?     @map("entity_id")

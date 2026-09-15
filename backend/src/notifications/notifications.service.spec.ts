@@ -158,4 +158,35 @@ describe('NotificationsService', () => {
     });
     expect(prisma.notification.create).not.toHaveBeenCalled();
   });
+
+  it('still notifies everybody else when one recipient cannot be written', async () => {
+    /*
+     * The case that produced this: an account is deleted between reading the recipient list and
+     * writing the row, so the insert fails a foreign key. The guard used to wrap the whole loop,
+     * which meant the first such recipient ended it and everybody after them got nothing — chosen
+     * by their position in an unordered query, with one line in the log about a failed event and
+     * no sign that anybody was still owed a notification.
+     */
+    const prisma = buildPrisma();
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'gone', email: 'gone@x.ss', firstName: 'Gone', lastName: 'Away' },
+      { id: 'sup1', email: 'sup@x.ss', firstName: 'Sup', lastName: 'One' },
+      { id: 'adm1', email: 'adm@x.ss', firstName: 'Adm', lastName: 'One' },
+    ]);
+    prisma.notification.create.mockImplementation((args: { data: { recipientId: string } }) =>
+      args.data.recipientId === 'gone'
+        ? Promise.reject(new Error('Foreign key constraint violated'))
+        : Promise.resolve({ id: `n-${args.data.recipientId}` }),
+    );
+
+    const svc = new NotificationsService(prisma as never, mail as never, []);
+    // Must not throw: a notification failure never breaks the action that triggered it.
+    await svc.complaintReceived({ referenceNumber: 'NCA/CMP/2026/000001', subject: 'No signal' });
+
+    const attempted = prisma.notification.create.mock.calls.map(
+      (call: [{ data: { recipientId: string } }]) => call[0].data.recipientId,
+    );
+    // Before the fix this was `['gone']`, and the other two handlers never heard about the case.
+    expect(attempted).toEqual(['gone', 'sup1', 'adm1']);
+  });
 });

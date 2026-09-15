@@ -57,6 +57,14 @@ export interface DataTableProps<T> {
   onRetry?: () => void;
   emptyMessage?: string;
   emptyAction?: ReactNode;
+  /**
+   * What this table is, for a screen reader arriving at its scroll region.
+   *
+   * Optional, with a serviceable default, because the alternative was a required prop on every one
+   * of the screens that already has a heading directly above the table saying the same thing.
+   * Worth passing where one screen shows more than one table.
+   */
+  label?: string;
   sort?: string;
   order?: SortOrder;
   onSortChange?: (sortKey: string, order: SortOrder) => void;
@@ -206,6 +214,7 @@ export function DataTable<T>({
   onRetry,
   emptyMessage = 'Nothing to show yet.',
   emptyAction,
+  label = 'Results',
   sort,
   order = 'desc',
   onSortChange,
@@ -346,6 +355,18 @@ export function DataTable<T>({
       className={`min-h-0 flex-1 overflow-auto overscroll-contain transition-opacity ${
         refreshing ? 'opacity-60' : ''
       }`}
+      /*
+       * Focusable, so the viewport can be scrolled with the arrow keys.
+       *
+       * A region that scrolls and cannot be reached from the keyboard is unreadable to anyone not
+       * using a mouse: the rows past the fold simply are not there. It goes unnoticed on most
+       * tables because their rows carry links and buttons, and tabbing through those scrolls the
+       * viewport as a side effect. A table of plain figures has nothing to tab to, which is why
+       * this surfaced on the levy screen and only once that screen had figures on it.
+       */
+      tabIndex={0}
+      role="group"
+      aria-label={label}
       aria-busy={refreshing || undefined}
     >
       {/*
@@ -367,7 +388,7 @@ export function DataTable<T>({
           ))}
         </colgroup>
 
-        <thead className="sticky top-0 z-10 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500 shadow-[inset_0_-1px_0_theme(colors.gray.200)]">
+        <thead className="sticky top-0 z-10 bg-gray-50 text-xs uppercase tracking-wide text-gray-500 shadow-[inset_0_-1px_0_theme(colors.gray.200)]">
           <tr>
             {selectable && (
               <th scope="col" className={cellPadding[density]}>
@@ -400,8 +421,12 @@ export function DataTable<T>({
                   }
                   // A header truncates like its cells do. Without this a long column name
                   // overflows its box and prints across the header beside it.
+                  // The alignment has to sit on the `th`, not on the `thead`. A browser's own
+                  // stylesheet says `th { text-align: center }`, and a rule that targets the element
+                  // beats a value inherited from its parent — so a class on `thead` never reached
+                  // here, and every header quietly centred itself over left-aligned data.
                   className={`truncate ${cellPadding[density]} ${
-                    col.align === 'right' ? 'text-right' : ''
+                    col.align === 'right' ? 'text-end' : 'text-start'
                   } ${col.hideOnMobile ? 'hidden sm:table-cell' : ''} ${col.className ?? ''}`}
                 >
                   {renderHeader(col)}
@@ -473,7 +498,7 @@ export function DataTable<T>({
                     <td
                       key={col.id ?? col.header ?? i}
                       className={`${cellPadding[density]} ${
-                        col.align === 'right' ? 'text-right' : ''
+                        col.align === 'right' ? 'text-end' : 'text-start'
                       } ${col.hideOnMobile ? 'hidden sm:table-cell' : ''} ${col.className ?? ''}`}
                     >
                       {clickable && i === 0 ? (
@@ -483,7 +508,7 @@ export function DataTable<T>({
                         <button
                           type="button"
                           onClick={() => onRowClick(row)}
-                          className="block w-full min-w-0 text-left focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-brand"
+                          className="block w-full min-w-0 text-start focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-brand"
                         >
                           {content}
                         </button>

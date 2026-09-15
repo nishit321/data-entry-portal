@@ -138,6 +138,11 @@ export class LevyService {
         id: true,
         label: true,
         dueDate: true,
+        // The exchange rate the Authority set for this cycle, and the day they set it. Held on the
+        // period rather than as one current rate, so restating this quarter never restates a year
+        // that has already been audited — NCA's instruction, 3 September 2026.
+        usdRate: true,
+        usdRateAt: true,
         template: {
           select: {
             name: true,
@@ -153,6 +158,21 @@ export class LevyService {
     const levyFieldIds = period.template.sections.flatMap((s) => s.fields.map((f) => f.id));
     const rate = await this.rateForDate(period.dueDate);
     const ratePercent = rate ? Number(rate.ratePercent) : null;
+
+    /*
+     * The same figures in USD, at the rate this period was assessed under.
+     *
+     * Every amount in the portal is SSP; USD is a second reading of the same number, not a second
+     * number. So it is derived here rather than stored, and derived from the period's own rate —
+     * the one point of holding the rate per period is that a figure converted last year stays
+     * converted at last year's rate.
+     *
+     * A period with no rate yet gives `null`, never zero. Zero is a figure and would be read as
+     * one; null is the screen saying it cannot tell you, which is the truth.
+     */
+    const usdRate = period.usdRate === null ? null : Number(period.usdRate);
+    const toUsd = (ssp: number | null): number | null =>
+      usdRate === null || usdRate <= 0 || ssp === null ? null : round2(ssp / usdRate);
 
     const submissions = await this.prisma.submission.findMany({
       where: {
@@ -177,7 +197,13 @@ export class LevyService {
         (sub.values ?? []).reduce((sum, v) => sum + (Number(v.valueText) || 0), 0),
       );
       const levyDue = ratePercent !== null ? round2((revenue * ratePercent) / 100) : null;
-      return { entity: sub.entity, assessableRevenue: revenue, levyDue };
+      return {
+        entity: sub.entity,
+        assessableRevenue: revenue,
+        levyDue,
+        assessableRevenueUsd: toUsd(revenue),
+        levyDueUsd: toUsd(levyDue),
+      };
     });
 
     return {
@@ -185,12 +211,28 @@ export class LevyService {
       template: { name: period.template.name },
       levyBasisConfigured: levyFieldIds.length > 0,
       rate: rate ? { id: rate.id, ratePercent, label: rate.label } : null,
-      totals: {
-        operatorsAssessed: rows.length,
-        totalRevenue: round2(rows.reduce((sum, r) => sum + r.assessableRevenue, 0)),
-        totalLevyDue:
-          ratePercent !== null ? round2(rows.reduce((sum, r) => sum + (r.levyDue ?? 0), 0)) : null,
-      },
+      /*
+       * The exchange rate is reported alongside the figures, not left implicit.
+       *
+       * A reader comparing two years of USD columns has to be able to see why they differ — and
+       * the answer is usually the rate, not the business. Hiding it turns a conversion into a
+       * claim nobody can check.
+       */
+      exchange: usdRate === null ? null : { sspPerUsd: usdRate, setAt: period.usdRateAt },
+      totals: (() => {
+        const totalRevenue = round2(rows.reduce((sum, r) => sum + r.assessableRevenue, 0));
+        const totalLevyDue =
+          ratePercent !== null ? round2(rows.reduce((sum, r) => sum + (r.levyDue ?? 0), 0)) : null;
+        return {
+          operatorsAssessed: rows.length,
+          totalRevenue,
+          totalLevyDue,
+          // Converted from the total, not summed from the rows: adding rounded halves drifts from
+          // the rounded whole, and the two figures sit next to each other on screen.
+          totalRevenueUsd: toUsd(totalRevenue),
+          totalLevyDueUsd: toUsd(totalLevyDue),
+        };
+      })(),
       rows,
     };
   }
@@ -216,7 +258,14 @@ export class LevyService {
       template: null,
       levyBasisConfigured: false,
       rate: null,
-      totals: { operatorsAssessed: 0, totalRevenue: 0, totalLevyDue: null },
+      exchange: null,
+      totals: {
+        operatorsAssessed: 0,
+        totalRevenue: 0,
+        totalLevyDue: null,
+        totalRevenueUsd: null,
+        totalLevyDueUsd: null,
+      },
       rows: [],
     };
   }

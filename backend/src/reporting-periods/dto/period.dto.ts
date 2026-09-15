@@ -4,7 +4,9 @@ import {
   IsInt,
   IsISO8601,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
+  IsPositive,
   IsString,
   IsUUID,
   Max,
@@ -47,6 +49,18 @@ export class CreatePeriodDto {
   graceDays?: number;
 
   /** SCHEDULED to prepare ahead of time, or OPEN (default) to accept submissions now. */
+  /**
+   * SSP per USD for this cycle.
+   *
+   * Left out and the period carries forward whatever the last one used, which is what an
+   * administrator scheduling next quarter almost always wants. Setting it here is the deliberate
+   * act of saying the rate has moved.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 }, { message: 'Give the rate as a number, e.g. 7000.' })
+  @IsPositive({ message: 'The rate must be more than zero.' })
+  usdRate?: number;
+
   @IsOptional()
   @IsIn([PeriodStatus.SCHEDULED, PeriodStatus.OPEN], {
     message: 'A new period can only be Scheduled or Open.',
@@ -55,6 +69,17 @@ export class CreatePeriodDto {
 }
 
 export class UpdatePeriodDto {
+  /**
+   * Changing this restates every USD figure for this cycle and no other.
+   *
+   * That containment is the whole reason the rate sits on the period: correcting a
+   * mistyped rate for one quarter must not touch a year that has already been audited.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 }, { message: 'Give the rate as a number, e.g. 7000.' })
+  @IsPositive({ message: 'The rate must be more than zero.' })
+  usdRate?: number;
+
   @IsOptional()
   @IsString()
   @IsNotEmpty()

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -252,12 +253,12 @@ export function ReferenceDataPage() {
               aria-label="Category"
             />
           </FilterField>
-          <FilterField label="Status" width="sm">
+          <FilterField label={strings.field.status} width="sm">
             <Select
               value={list.filters.isActive}
               onChange={(isActive) => list.setFilters({ isActive })}
               options={STATUS_FILTER_OPTIONS}
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
             />
           </FilterField>
         </>
@@ -294,7 +295,7 @@ export function ReferenceDataPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : (
             <Button variant="secondary" onClick={openCreate}>
@@ -315,7 +316,7 @@ export function ReferenceDataPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button type="submit" form="reference-item-form" isLoading={saveMutation.isPending}>
               {editing ? 'Save changes' : 'Add value'}
@@ -340,14 +341,19 @@ export function ReferenceDataPage() {
                 />
               )}
             </FormField>
-            <FormField htmlFor="label" label="Label" error={errors.label?.message} required>
+            <FormField
+              htmlFor="label"
+              label={strings.field.label}
+              error={errors.label?.message}
+              required
+            >
               {(field) => (
                 <Input {...field} placeholder="e.g. 900 MHz" {...form.register('label')} />
               )}
             </FormField>
             <FormField
               htmlFor="description"
-              label="Description (optional)"
+              label={strings.field.descriptionOptional}
               error={errors.description?.message}
             >
               {(field) => (

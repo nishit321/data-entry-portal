@@ -8,7 +8,7 @@ the results.
 This repository holds both halves of the system.
 
 ```
-data-entry-portal/
+nca-portal/
 ├── backend/     NestJS API on PostgreSQL (Prisma)
 ├── frontend/    React + Vite single-page client
 └── tools/       shared local tooling, including the custom ESLint copy plugin

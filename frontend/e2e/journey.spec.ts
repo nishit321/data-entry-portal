@@ -14,7 +14,9 @@ test('an operator files a return, start to finish', async ({ page }) => {
   await signIn(page, 'operator');
 
   await page.goto('/submissions');
-  await expect(page.getByText("You haven't started a return yet.")).toBeVisible();
+  // The seeded operator has closed quarters behind it, so the list is not empty. What has to be
+  // true before this test starts is narrower: the period it is about to file for is not in it yet.
+  await expect(page.getByRole('table')).not.toContainText('2026 Q1');
 
   // --- Open a draft for the period that is due -------------------------------------------------
   await page.getByRole('button', { name: 'Start a return' }).first().click();
@@ -54,7 +56,6 @@ test('an operator files a return, start to finish', async ({ page }) => {
   await expect(page.getByText('Draft', { exact: true })).toBeHidden();
 
   await page.goto('/submissions');
-  await expect(page.getByText("You haven't started a return yet.")).toBeHidden();
   await expect(page.getByRole('table')).toContainText('2026 Q1');
 });
 

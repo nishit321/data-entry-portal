@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { strings } from '../../lib/strings';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useScrollLock } from '../../hooks/useScrollLock';
@@ -81,7 +82,7 @@ export function Drawer({
   if (!open) return null;
 
   const maxWidth = width === 'lg' ? 'sm:max-w-2xl' : 'sm:max-w-lg';
-  const edge = side === 'right' ? 'right-0' : 'left-0';
+  const edge = side === 'right' ? 'end-0' : 'start-0';
 
   return createPortal(
     <div className="fixed inset-0 z-50">
@@ -101,7 +102,7 @@ export function Drawer({
           </div>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={strings.action.close}
             onClick={onClose}
             className="shrink-0 rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >

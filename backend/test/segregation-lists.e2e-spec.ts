@@ -56,6 +56,7 @@ interface World {
   token: string;
   agentRef: string;
   siteRef: string;
+  linkRef: string;
   documentTitle: string;
   clientName: string;
   submissionId: string;
@@ -128,6 +129,9 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
     if (ids.length) {
       await prisma.submission.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.documentRecord.deleteMany({ where: { entityId: { in: ids } } });
+      // Routes before nodes: the cascade would take them anyway, but an explicit order says what
+      // depends on what to whoever reads this next.
+      await prisma.fibreLink.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.networkSite.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.apiClient.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.agent.deleteMany({ where: { entityId: { in: ids } } });
@@ -153,7 +157,7 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
               key: 'general',
               title: 'General',
               order: 1,
-              applicableEntityTypes: [EntityType.MNO],
+              applicableEntityTypes: [EntityType.MMO],
               frequency: 'QUARTERLY_AND_ANNUAL',
               fields: {
                 create: [
@@ -198,7 +202,20 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
     const entity = await prisma.entity.create({
       data: {
         name: entityName,
-        type: EntityType.MNO,
+        /*
+         * MMO, and not for realism: this suite asserts that its figures are *withheld* because too
+         * few operators are in the peer group, and a peer group is every active operator of one
+         * type across the whole database.
+         *
+         * Twenty-seven suites create MNOs, and several of them submit returns. Whenever two of
+         * those overlapped with this one's two operators, the group reached three, disclosure was
+         * allowed, and this suite failed — for a reason that had nothing to do with segregation.
+         * It took several runs to catch because it needs the overlap to land inside this test.
+         *
+         * Only submitted returns count towards the group (`submittedAt: { not: null }`), and no
+         * other suite submits one as MMO. Keep it that way, or move this to another unused type.
+         */
+        type: EntityType.MMO,
         status: EntityStatus.ACTIVE,
         licenceNumber: licence,
       },
@@ -220,13 +237,35 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
     });
 
     const siteRef = `SITE-LIST-${tag}`;
-    await prisma.networkSite.create({
+    const site = await prisma.networkSite.create({
       data: {
         entityId: entity.id,
         siteReference: siteRef,
         name: `Site List ${tag}`,
         latitude: 4.85,
         longitude: 31.58,
+      },
+    });
+
+    // A second node and the route between them. A route carries two site names, so a route list
+    // that was not scoped would hand one operator the names of another's nodes.
+    const secondSite = await prisma.networkSite.create({
+      data: {
+        entityId: entity.id,
+        siteReference: `SITE-LIST-${tag}-2`,
+        name: `Site List ${tag} two`,
+        latitude: 4.95,
+        longitude: 31.68,
+      },
+    });
+    const linkRef = `LINK-LIST-${tag}`;
+    await prisma.fibreLink.create({
+      data: {
+        entityId: entity.id,
+        linkReference: linkRef,
+        name: `Route List ${tag}`,
+        fromSiteId: site.id,
+        toSiteId: secondSite.id,
       },
     });
 
@@ -307,6 +346,7 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
       token,
       agentRef,
       siteRef,
+      linkRef,
       documentTitle,
       clientName,
       submissionId: submission.id,
@@ -336,6 +376,7 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
   const PROBES: Record<string, ListProbe> = {
     'GET /api/v1/agents': { kind: 'scoped', mine: (a) => a.agentRef },
     'GET /api/v1/geo/sites': { kind: 'scoped', mine: (a) => a.siteRef },
+    'GET /api/v1/geo/links': { kind: 'scoped', mine: (a) => a.linkRef },
     // The map returns a site's display name, not its reference, so that is what proves A's own
     // sites came back.
     'GET /api/v1/geo/map': { kind: 'scoped', mine: () => 'Site List A' },
@@ -346,6 +387,12 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
     'GET /api/v1/notifications': { kind: 'scoped', mine: () => 'Notice for List A' },
     'GET /api/v1/entities/me': { kind: 'scoped', mine: (a) => a.licence },
     'GET /api/v1/auth/me': { kind: 'scoped', mine: (a) => a.email },
+    'GET /api/v1/auth/totp': {
+      kind: 'scoped',
+      noControl:
+        "whether the caller's own account has an authenticator app. Two booleans and a count of " +
+        'their own recovery codes, naming nobody.',
+    },
     'GET /api/v1/auth/phone': {
       kind: 'shared',
       noControl:
@@ -479,6 +526,7 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
       { label: 'licence number', value: w.licence },
       { label: 'agent reference', value: w.agentRef },
       { label: 'site reference', value: w.siteRef },
+      { label: 'route reference', value: w.linkRef },
       { label: 'document title', value: w.documentTitle },
       { label: 'API client name', value: w.clientName },
       { label: 'user email', value: w.email },

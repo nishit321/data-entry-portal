@@ -1,10 +1,11 @@
 import type { ComboboxSource } from '../components/ui/Combobox';
 import { entitiesApi } from './entities.api';
+import { geoApi } from './geo.api';
 import { periodsApi } from './reporting-periods.api';
 import { templatesApi } from './templates.api';
 import { usersApi } from './auth.api';
 import { formatDate, joinMeta } from './format';
-import { ROLE_LABELS } from './types';
+import { NETWORK_SITE_KIND_LABELS, ROLE_LABELS } from './types';
 
 // The `Combobox` sources for every growable collection a screen might need to pick from
 // (FRONTEND_STANDARDS §2).
@@ -116,6 +117,41 @@ export const periodPicker: ComboboxSource = {
       value: period.id,
       label: period.label,
       detail: joinMeta(period.template.name, `due ${formatDate(period.dueDate)}`),
+    };
+  },
+};
+
+/**
+ * Sites on the network register, for joining two of them with a fibre route.
+ *
+ * Scoped by the API, not here: an operator searching this picker sees its own register and nobody
+ * else's, which is what stops a route being drawn to a competitor's node.
+ */
+export const sitePicker: ComboboxSource = {
+  queryKey: 'network-sites',
+  fetch: async ({ search, page }) => {
+    const result = await geoApi.list({
+      search,
+      page,
+      pageSize: PAGE_SIZE,
+      sort: 'name',
+      order: 'asc',
+    });
+    return {
+      options: result.data.map((s) => ({
+        value: s.id,
+        label: s.name,
+        detail: joinMeta(s.siteReference, NETWORK_SITE_KIND_LABELS[s.kind]),
+      })),
+      hasNext: result.meta.hasNext,
+    };
+  },
+  resolve: async (id) => {
+    const site = await geoApi.get(id);
+    return {
+      value: site.id,
+      label: site.name,
+      detail: joinMeta(site.siteReference, NETWORK_SITE_KIND_LABELS[site.kind]),
     };
   },
 };

@@ -22,6 +22,12 @@ export interface ResetConfig {
   tokenTtlMin: number;
 }
 
+/** The authenticator-app factor. An empty key means it is unavailable rather than insecure. */
+export interface TotpConfig {
+  encryptionKey: string;
+  issuer: string;
+}
+
 /** The SMS gateway. Empty token means no gateway, and the SMS channel switches itself off. */
 export interface SmsConfig {
   url: string;
@@ -122,6 +128,10 @@ export default () => ({
     fromName: process.env.MAIL_FROM_NAME ?? 'NCA Data Collection Portal',
     loginUrl: process.env.FRONTEND_LOGIN_URL ?? 'http://localhost:5173/login',
   } as MailConfig,
+  totp: {
+    encryptionKey: process.env.TOTP_ENCRYPTION_KEY ?? '',
+    issuer: process.env.TOTP_ISSUER ?? 'NCA Portal',
+  } as TotpConfig,
   sms: {
     url: process.env.SMS_API_URL || DEFAULT_SMS_ENDPOINT,
     token: process.env.SMS_API_TOKEN ?? '',

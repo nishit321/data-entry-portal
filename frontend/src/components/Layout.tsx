@@ -7,6 +7,8 @@ import { RouteErrorBoundary } from './RouteErrorBoundary';
 import { PageLoading } from './ui/PageLoading';
 import { usePreference } from '../hooks/usePreference';
 import { usePageMeta } from '../hooks/usePageMeta';
+import { PrintHeader } from './PrintHeader';
+import { useAuth } from '../context/AuthContext';
 import { pageTitle } from './layout/nav';
 
 /**
@@ -21,6 +23,7 @@ export function Layout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [collapsed, setCollapsed] = usePreference('sidebar-collapsed', false);
   const location = useLocation();
+  const { user } = useAuth();
 
   // Title, focus, and the screen-reader announcement for every route change, in one place (§6).
   usePageMeta(pageTitle(location.pathname));
@@ -36,7 +39,7 @@ export function Layout() {
       {/* Keyboard skip link — first focusable element, visible only when focused (§6). */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-[70] focus:rounded-md focus:bg-brand focus:px-3 focus:py-2 focus:text-sm focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-3 focus:z-[70] focus:rounded-md focus:bg-brand focus:px-3 focus:py-2 focus:text-sm focus:text-white"
       >
         Skip to content
       </a>
@@ -53,6 +56,15 @@ export function Layout() {
         <ConnectionBanner />
         {/* The single content region. Pages render `Page` (scrolls) or `ListShell` (fills). */}
         <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+          {/*
+            Inside `main`, because the print stylesheet hides everything outside it. One place
+            rather than one per screen: the pages worth printing are not the ones anybody would
+            remember to decorate.
+          */}
+          <PrintHeader
+            title={pageTitle(location.pathname)}
+            takenBy={user ? `${user.firstName} ${user.lastName}`.trim() : undefined}
+          />
           {/* Keyed on the path so a crash in one screen is cleared by navigating away (§5). */}
           <RouteErrorBoundary key={location.pathname}>
             {/* Inside the shell, so a page chunk downloading leaves the nav usable rather than

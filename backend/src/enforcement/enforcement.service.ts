@@ -6,6 +6,8 @@ import {
   EntityStatus,
   EntityType,
   Prisma,
+  ReportingFrequency,
+  SubmissionStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -28,6 +30,42 @@ import { ResolveCaseDto } from './dto/resolve-case.dto';
  * officer's email address or internal role, and this list is the one place Authority staff details
  * would otherwise cross to an external account.
  */
+/**
+ * Everything `assessPenalty` reads from a schedule line.
+ *
+ * Named once and shared, because a select that quietly omits a term does not fail — it prices the
+ * case as though the term were not there.
+ */
+/**
+ * The statutory remedy period, in days (NCA, 3 September 2026).
+ *
+ * The Act requires thirty days' notice before any financial penalty. NCA set out exactly how that
+ * meets the accrual, and the wording is worth keeping because the two obvious readings give very
+ * different sums on a long default:
+ *
+ *   "From the original late date (after the grace window), but only assessed once the 30-day
+ *    remedy period lapses unremedied. So nothing is payable during the 30 days, but a defaulter
+ *    doesn't get a free month either."
+ *
+ * So the notice gates **assessment**, not accrual. The figure is still calculated from the day the
+ * return was genuinely late; it simply is not payable until the operator has had their thirty days
+ * and not used them.
+ */
+export const REMEDY_PERIOD_DAYS = 30;
+
+/** Thirty days after the notice went out. */
+function remedyDueFrom(noticeAt: Date): Date {
+  return new Date(noticeAt.getTime() + REMEDY_PERIOD_DAYS * 86_400_000);
+}
+
+const penaltyTermsSelect = {
+  fixedAmount: true,
+  dailyAmount: true,
+  maxAmount: true,
+  minAmount: true,
+  percentOfRevenue: true,
+} satisfies Prisma.PenaltyRuleSelect;
+
 const caseSelect = {
   id: true,
   reason: true,
@@ -42,13 +80,13 @@ const caseSelect = {
   penaltyAssessedAt: true,
   defaultStartedAt: true,
   defaultEndedAt: true,
+  remedyNoticeAt: true,
+  remedyDueAt: true,
   entity: { select: { id: true, name: true, type: true } },
   period: { select: { id: true, label: true, frequency: true, dueDate: true } },
   resolvedBy: { select: { id: true, firstName: true, lastName: true } },
   // The line the amount was priced under, so an operator can be told why it owes what it owes.
-  penaltyRule: {
-    select: { id: true, label: true, fixedAmount: true, dailyAmount: true, maxAmount: true },
-  },
+  penaltyRule: { select: { id: true, label: true, ...penaltyTermsSelect } },
 } satisfies Prisma.EnforcementCaseSelect;
 
 /**
@@ -241,7 +279,7 @@ export class EnforcementService {
       // The contravention begins when the grace window closes, not when the sweep happens to run.
       // A sweep that is late must not shorten the penalty an operator has actually incurred.
       const startedAt = graceEndsAt(period.dueDate, period.graceDays);
-      const priced = await this.priceCase(entity.type, startedAt, null);
+      const priced = await this.priceCase(entity.type, entity.id, startedAt, null);
 
       // The `findUnique` above is a cheap first pass, not a lock. Two sweeps running at once (two
       // instances, or an administrator pressing the button while the nightly job runs) both see no
@@ -249,6 +287,17 @@ export class EnforcementService {
       // losing that race means the case already exists, which is the outcome we wanted anyway.
       let created: { id: string };
       try {
+        /*
+         * Opening the case issues the remedy notice, and the amount is held back until it lapses.
+         *
+         * The penalty is still *calculated* from `defaultStartedAt`, the day the return was
+         * genuinely late — the operator does not get a free month. What waits is the figure
+         * becoming payable, which is what the Act's thirty days' notice protects.
+         *
+         * `penaltyAssessedAt` therefore stays null here even when the line prices cleanly. It is
+         * set by the accrual once the notice has run out with the return still missing.
+         */
+        const noticeAt = new Date();
         created = await this.prisma.enforcementCase.create({
           data: {
             entityId: entity.id,
@@ -256,10 +305,17 @@ export class EnforcementService {
             reason: EnforcementReason.MISSED_DEADLINE,
             note: `No return filed for ${period.label} by the end of the grace period.`,
             defaultStartedAt: startedAt,
+            remedyNoticeAt: noticeAt,
+            remedyDueAt: remedyDueFrom(noticeAt),
             penaltyRuleId: priced?.ruleId ?? null,
-            penaltyAmount: priced ? new Prisma.Decimal(priced.amount) : null,
+            /*
+             * A percentage line whose audited revenue is not in yet has no amount — not an amount
+             * of zero. Writing the zero would put a figure on the case that reads as "nothing to
+             * pay", which is the opposite of what it means, and nothing later would correct it.
+             */
+            penaltyAmount: priced && !priced.pending ? new Prisma.Decimal(priced.amount) : null,
             penaltyDays: priced?.days ?? 0,
-            penaltyAssessedAt: priced ? new Date() : null,
+            penaltyAssessedAt: null,
           },
           select: { id: true },
         });
@@ -310,20 +366,68 @@ export class EnforcementService {
    * until Legal and Licensing have entered the figures. An engine that refused to record a
    * contravention because nobody had priced it yet would lose the contravention.
    */
-  private async priceCase(entityType: EntityType, startedAt: Date, endedAt: Date | null) {
+  private async priceCase(
+    entityType: EntityType,
+    entityId: string,
+    startedAt: Date,
+    endedAt: Date | null,
+  ) {
     const rule = await this.schedule.ruleFor(
       EnforcementReason.MISSED_DEADLINE,
       entityType,
       startedAt,
     );
     if (!rule) return null;
+    const now = new Date();
+    // Only a percentage line consults revenue, so only a percentage line pays for the lookup.
+    const revenue =
+      rule.percentOfRevenue == null ? null : await this.auditedAnnualRevenue(entityId, now);
     const assessment = assessPenalty(
       PenaltyScheduleService.toTerms(rule),
       startedAt,
       endedAt,
-      new Date(),
+      now,
+      revenue,
     );
     return { ruleId: rule.id, ...assessment };
+  }
+
+  /**
+   * The operator's audited annual revenue, for a schedule line priced as a share of it.
+   *
+   * Tiers 2 and 3 of NCA's schedule are stated as a percentage of audited annual revenue, and
+   * VALIDATION_SPEC §4.1 is explicit that the annual return carries that figure from audited
+   * accounts rather than a sum of the quarters — so the annual return is the only honest place to
+   * read it from. Which fields make up "revenue" is the same question the levy asks, and it is
+   * answered the same way: the fields an administrator flagged as the levy basis. A penalty and a
+   * levy assessed on different money would be indefensible the first time an operator compared them.
+   *
+   * Null when no annual return has been approved yet — the ordinary case for a contravention early
+   * in the year. The caller records that as "not yet assessable", never as zero.
+   */
+  private async auditedAnnualRevenue(entityId: string, asOf: Date): Promise<number | null> {
+    const annual = await this.prisma.submission.findFirst({
+      where: {
+        entityId,
+        status: SubmissionStatus.APPROVED,
+        deletedAt: null,
+        supersededBy: null,
+        period: {
+          frequency: ReportingFrequency.ANNUAL,
+          deletedAt: null,
+          dueDate: { lte: asOf },
+        },
+      },
+      orderBy: { period: { dueDate: 'desc' } },
+      select: {
+        values: {
+          where: { isUnavailable: false, field: { isLevyBasis: true } },
+          select: { valueText: true },
+        },
+      },
+    });
+    if (!annual || annual.values.length === 0) return null;
+    return annual.values.reduce((sum, v) => sum + (Number(v.valueText) || 0), 0);
   }
 
   /**
@@ -347,8 +451,11 @@ export class EnforcementService {
         penaltyAmount: true,
         penaltyDays: true,
         defaultStartedAt: true,
+        remedyDueAt: true,
         period: { select: { label: true } },
-        penaltyRule: { select: { fixedAmount: true, dailyAmount: true, maxAmount: true } },
+        // Every field the arithmetic reads. Selecting three of them is how a percentage line
+        // silently became a zero.
+        penaltyRule: { select: penaltyTermsSelect },
       },
     });
     if (open.length === 0) return { cases: 0, accrued: 0, closed: 0 };
@@ -376,32 +483,64 @@ export class EnforcementService {
 
     for (const c of open) {
       const endedAt = arrivedAt.get(`${c.entityId}::${c.periodId}`) ?? null;
+      /*
+       * The same mapping the sweep uses, rather than the three fields rebuilt by hand here.
+       *
+       * They were rebuilt, and once the schedule gained a percentage tier that mattered: a line
+       * priced as a share of revenue would have arrived here with its percentage stripped, fallen
+       * through to the fixed-and-daily arithmetic, and accrued **zero** — a wrong figure presented
+       * as a real one, which is worse than none. Two places deciding what a schedule line means is
+       * the defect; one mapping is the fix.
+       */
+      // A percentage line is priced on audited annual revenue; a fixed-and-daily line never reads
+      // it, so the lookup only runs where it can change the answer.
+      const isRevenueShare = (c.penaltyRule?.percentOfRevenue ?? null) !== null;
+      const revenue = isRevenueShare ? await this.auditedAnnualRevenue(c.entityId, now) : null;
       const assessment = c.penaltyRule
         ? assessPenalty(
-            {
-              fixedAmount: Number(c.penaltyRule.fixedAmount),
-              dailyAmount: Number(c.penaltyRule.dailyAmount),
-              maxAmount: c.penaltyRule.maxAmount === null ? null : Number(c.penaltyRule.maxAmount),
-            },
+            PenaltyScheduleService.toTerms(c.penaltyRule),
             c.defaultStartedAt!,
             endedAt,
             now,
+            revenue,
           )
         : null;
 
+      /*
+       * Has the operator had their thirty days, and not used them?
+       *
+       * This decides whether the figure is *payable*, not what it is. A case opened without a
+       * notice date is one from before this existed; treating it as still within its remedy period
+       * would freeze it for ever, so an absent date reads as "the period has passed".
+       */
+      const remedyLapsed = c.remedyDueAt === null || c.remedyDueAt <= now;
+
       if (endedAt) {
-        // The return arrived. Close the case, with the amount frozen at what had accrued by the
-        // day it came in rather than by the day the job happened to notice.
+        /*
+         * The return arrived. Close the case, with the amount frozen at what had accrued by the day
+         * it came in rather than by the day the job happened to notice.
+         *
+         * If it arrived inside the remedy period, NCA's rule is that "only the Tier 1 late charge
+         * stands" — the operator remedied when asked. A per-day line is a Tier 1 late charge and
+         * still applies; a percentage of revenue is a Tier 2 or 3 sanction and does not, because
+         * the notice was answered.
+         */
+        const curedInTime = !remedyLapsed;
+        // An amount still awaiting audited revenue is not payable either — it is not yet a figure.
+        const payable =
+          assessment && !assessment.pending && !(curedInTime && isRevenueShare) ? assessment : null;
         await this.prisma.enforcementCase.update({
           where: { id: c.id },
           data: {
             status: EnforcementStatus.RESOLVED,
             defaultEndedAt: endedAt,
             resolvedAt: now,
-            resolutionNote: `Closed automatically: the return for ${c.period.label} was filed.`,
-            penaltyAmount: assessment ? new Prisma.Decimal(assessment.amount) : undefined,
+            resolutionNote: curedInTime
+              ? `Closed automatically: the return for ${c.period.label} was filed within the remedy period.`
+              : `Closed automatically: the return for ${c.period.label} was filed.`,
+            penaltyAmount: payable ? new Prisma.Decimal(payable.amount) : undefined,
             penaltyDays: assessment?.days,
-            penaltyAssessedAt: assessment ? now : undefined,
+            penaltyAssessedAt: payable ? now : undefined,
           },
         });
         closed += 1;
@@ -409,7 +548,8 @@ export class EnforcementService {
           caseId: c.id,
           entityId: c.entityId,
           automatic: true,
-          penaltyAmount: assessment?.amount,
+          penaltyAmount: payable?.amount,
+          curedWithinRemedyPeriod: curedInTime,
         });
         await this.notifications.enforcementCaseClosed({
           entityId: c.entityId,
@@ -419,14 +559,25 @@ export class EnforcementService {
         continue;
       }
 
-      if (!assessment || Number(c.penaltyAmount ?? 0) === assessment.amount) continue;
+      // Nothing to write for a line that still has no figure, or one that has not moved.
+      if (!assessment || assessment.pending) continue;
+      if (Number(c.penaltyAmount ?? 0) === assessment.amount) continue;
 
+      /*
+       * The return is still missing. Keep the running figure up to date either way, but only stamp
+       * `penaltyAssessedAt` once the remedy period has lapsed.
+       *
+       * That stamp is what makes the amount payable, and it is the whole of the Act's protection
+       * here: during the thirty days the case shows what is accruing and nothing is due. Leaving
+       * the amount unchanged instead would be the other reading of NCA's answer, and they ruled it
+       * out — "a defaulter doesn't get a free month either".
+       */
       await this.prisma.enforcementCase.update({
         where: { id: c.id },
         data: {
           penaltyAmount: new Prisma.Decimal(assessment.amount),
           penaltyDays: assessment.days,
-          penaltyAssessedAt: now,
+          penaltyAssessedAt: remedyLapsed ? now : null,
         },
       });
       accrued += 1;
@@ -436,6 +587,7 @@ export class EnforcementService {
         amount: assessment.amount,
         days: assessment.days,
         capped: assessment.capped,
+        payableNow: remedyLapsed,
       });
     }
 

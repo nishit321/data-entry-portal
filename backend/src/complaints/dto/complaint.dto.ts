@@ -58,6 +58,25 @@ export class TrackComplaintDto {
   trackingCode: string;
 }
 
+/**
+ * Attaching evidence to a complaint already filed.
+ *
+ * The reference and the code travel in the body, not the path, for the same reason `track` does:
+ * a reference number is `NCA/CMP/2026/000123` and the slashes in it are not path separators.
+ *
+ * These arrive as multipart form fields, so every value is a string on the wire. There is nothing
+ * here to coerce — both are strings — which is why this DTO needs no transforms.
+ */
+export class AttachComplaintFileDto {
+  @IsString()
+  @MaxLength(40)
+  referenceNumber: string;
+
+  @IsString()
+  @MaxLength(80)
+  trackingCode: string;
+}
+
 export const COMPLAINT_SORT_COLUMNS = ['createdAt', 'status', 'category'] as const;
 export type ComplaintSortColumn = (typeof COMPLAINT_SORT_COLUMNS)[number];
 

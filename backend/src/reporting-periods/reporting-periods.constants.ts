@@ -8,6 +8,14 @@ export const PERIOD_FREQUENCIES: ReportingFrequency[] = [
 ];
 
 /** Row/detail view — includes the parent template's name/version for display. */
+/**
+ * SSP per USD used for the very first reporting period, before there is one to carry forward.
+ *
+ * NCA's figure, given on 3 September 2026, not an estimate of ours. It is only ever the starting
+ * point: every period after the first inherits whatever the previous one used.
+ */
+export const STARTING_USD_RATE = 7000;
+
 export const periodSelect = {
   id: true,
   templateId: true,
@@ -17,6 +25,8 @@ export const periodSelect = {
   periodEnd: true,
   dueDate: true,
   graceDays: true,
+  usdRate: true,
+  usdRateAt: true,
   status: true,
   openedAt: true,
   closedAt: true,

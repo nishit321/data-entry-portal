@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Link } from 'react-router-dom';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -291,7 +292,7 @@ export function EntitiesPage() {
       }}
       filters={
         <>
-          <FilterField label="Type" width="lg">
+          <FilterField label={strings.field.type} width="lg">
             <Select
               id="type-filter"
               aria-label="Filter by type"
@@ -300,10 +301,10 @@ export function EntitiesPage() {
               onChange={(type) => list.setFilters({ type })}
             />
           </FilterField>
-          <FilterField label="Status" width="md">
+          <FilterField label={strings.field.status} width="md">
             <Select
               id="status-filter"
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.status}
               options={STATUS_FILTER_OPTIONS}
               onChange={(status) => list.setFilters({ status })}
@@ -345,7 +346,7 @@ export function EntitiesPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : (
             <Button variant="secondary" onClick={openCreate}>
@@ -388,7 +389,7 @@ export function EntitiesPage() {
             />
             <div className="flex justify-end">
               <Button variant="secondary" onClick={() => setViewing(null)}>
-                Close
+                {strings.action.close}
               </Button>
             </div>
           </div>
@@ -403,12 +404,22 @@ export function EntitiesPage() {
         <form onSubmit={form.handleSubmit((v) => saveMutation.mutate(v))} className="space-y-4">
           {error && <Alert tone="danger">{error}</Alert>}
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField htmlFor="name" label="Name" error={errors.name?.message} required>
+            <FormField
+              htmlFor="name"
+              label={strings.field.name}
+              error={errors.name?.message}
+              required
+            >
               {(field) => (
                 <Input {...field} placeholder="e.g. Zain South Sudan" {...form.register('name')} />
               )}
             </FormField>
-            <FormField htmlFor="type" label="Type" error={errors.type?.message} required>
+            <FormField
+              htmlFor="type"
+              label={strings.field.type}
+              error={errors.type?.message}
+              required
+            >
               {(field) => (
                 <Controller
                   control={form.control}
@@ -427,7 +438,7 @@ export function EntitiesPage() {
               )}
             </FormField>
             {editing && (
-              <FormField htmlFor="status" label="Status">
+              <FormField htmlFor="status" label={strings.field.status}>
                 {(field) => (
                   <Select
                     id={field.id}
@@ -540,7 +551,7 @@ export function EntitiesPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button type="submit" isLoading={saveMutation.isPending}>
               {editing ? 'Save changes' : 'Create entity'}

@@ -72,7 +72,7 @@ function AnomalyItem({ row, canSeeEntity }: { row: AnomalyRow; canSeeEntity: boo
           {joinMeta(canSeeEntity && row.entity.name, row.period.label, row.template.name)}
         </p>
       </div>
-      <div className="shrink-0 text-right">
+      <div className="shrink-0 text-end">
         <div className="text-sm font-semibold tabular-nums text-gray-900">
           {formatNumber(row.anomaly.value)}
         </div>

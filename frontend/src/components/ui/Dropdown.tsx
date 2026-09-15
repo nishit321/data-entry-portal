@@ -140,7 +140,7 @@ export function Dropdown({
                   role="menuitem"
                   disabled={item.disabled}
                   onClick={() => run(item)}
-                  className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`flex w-full items-center gap-2 px-4 py-2.5 text-start text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
                     item.danger
                       ? 'text-danger-700 hover:bg-danger-50 focus:bg-danger-50'
                       : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'

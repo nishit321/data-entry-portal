@@ -61,7 +61,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">
                 {initials(user.firstName, user.lastName)}
               </span>
-              <span className="hidden text-left sm:block">
+              <span className="hidden text-start sm:block">
                 <span className="block text-sm font-medium text-gray-900">
                   {user.firstName} {user.lastName}
                 </span>

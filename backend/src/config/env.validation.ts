@@ -32,6 +32,14 @@ export const envValidationSchema = Joi.object({
   MAIL_FROM_NAME: Joi.string().default('NCA Data Collection Portal'),
   FRONTEND_LOGIN_URL: Joi.string().uri().default('http://localhost:5173/login'),
 
+  // --- Authenticator app / TOTP (Q8) ---
+  // The key that encrypts every TOTP secret at rest. 64 hex characters (32 bytes). Leave it empty
+  // and authenticator apps are simply unavailable, exactly as they were before this existed.
+  // Generate one with: openssl rand -hex 32
+  TOTP_ENCRYPTION_KEY: Joi.string().allow('').default(''),
+  // What appears in the authenticator app above the account name.
+  TOTP_ISSUER: Joi.string().max(64).default('NCA Portal'),
+
   // --- SMS gateway (Q8) ---
   // Leave SMS_API_TOKEN empty and the SMS channel reports itself disabled, exactly as it did
   // before a vendor existed. Nothing else changes.

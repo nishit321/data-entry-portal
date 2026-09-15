@@ -30,6 +30,14 @@ const auditLogSelect = {
   userAgent: true,
   createdAt: true,
   actor: { select: { id: true, firstName: true, lastName: true, email: true, role: true } },
+  /*
+   * The identity as it stood when the action happened, alongside the join.
+   *
+   * The join answers "who is this person now", which is the wrong question for an audit trail and
+   * answers nothing at all once the account has gone. A reader falls back to these.
+   */
+  actorEmail: true,
+  actorName: true,
 } satisfies Prisma.AuditLogSelect;
 
 /**
@@ -44,10 +52,13 @@ export class AuditService {
 
   async record(entry: AuditEntry): Promise<void> {
     try {
+      const actor = entry.actorId ? await this.actorSnapshot(entry.actorId) : null;
       await this.prisma.auditLog.create({
         data: {
           action: entry.action,
           actorId: entry.actorId ?? null,
+          actorEmail: actor?.email ?? null,
+          actorName: actor?.name ?? null,
           entityType: entry.entityType,
           entityId: entry.entityId,
           metadata: entry.metadata,
@@ -59,6 +70,27 @@ export class AuditService {
     } catch (err) {
       this.logger.error(`Failed to write audit log for action ${entry.action}`, err as Error);
     }
+  }
+
+  /**
+   * Who the actor was, at the moment they acted.
+   *
+   * Copied onto the record rather than left to the join, for two reasons. Deleting an account sets
+   * `actorId` to null on every row that account wrote, which would leave the trail saying nobody
+   * did it. And a name read through the join is the name that person has *today* — an audit record
+   * should say who they were when it happened, not who they have since become.
+   *
+   * One indexed primary-key lookup per audited action. A failure here is swallowed by the caller's
+   * try/catch along with everything else, which is right: an audit write must never be the reason
+   * an operator's return does not save.
+   */
+  private async actorSnapshot(actorId: string): Promise<{ email: string; name: string } | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: actorId },
+      select: { email: true, firstName: true, lastName: true },
+    });
+    if (!user) return null;
+    return { email: user.email, name: `${user.firstName} ${user.lastName}`.trim() };
   }
 
   /**

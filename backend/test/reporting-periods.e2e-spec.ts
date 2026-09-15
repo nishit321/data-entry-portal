@@ -122,6 +122,13 @@ describe('Reporting periods (e2e)', () => {
     dueDate: '2026-04-15',
   });
 
+  /** One period against the published template, labelled uniquely so a re-run cannot collide. */
+  const create = (over: { label: string; usdRate?: number }) =>
+    request(server)
+      .post('/api/v1/reporting-periods')
+      .set(auth(adminToken))
+      .send({ ...body(publishedId), ...over, label: `${over.label} ${Date.now()}` });
+
   it('requires authentication (401)', async () => {
     await request(server).get('/api/v1/reporting-periods').expect(401);
   });
@@ -210,5 +217,80 @@ describe('Reporting periods (e2e)', () => {
       .delete(`/api/v1/reporting-periods/${spare.body.id}`)
       .set(auth(adminToken))
       .expect(200);
+  });
+
+  describe('the USD rate (NCA, 3 September 2026)', () => {
+    /*
+     * NCA asked for the rate to be stored per reporting period with a date, and gave the reason:
+     * "so updating today's rate doesn't silently rewrite last year's audited USD figures".
+     *
+     * That reason is the specification, and it is what these check — not that a column exists.
+     */
+    it('starts at the rate NCA gave, when there is nothing to carry forward', async () => {
+      // Every other period in the database is this suite's own, and the first one made here has
+      // no predecessor with a rate.
+      const first = await create({ label: 'USD first' });
+      expect(first.status).toBe(201);
+      expect(Number(first.body.usdRate)).toBe(7000);
+      expect(first.body.usdRateAt).toBeTruthy();
+    });
+
+    it('carries the last rate forward, so nobody retypes a number that has not moved', async () => {
+      await create({ label: 'USD carry a', usdRate: 7250 });
+      const next = await create({ label: 'USD carry b' });
+      expect(next.status).toBe(201);
+      expect(Number(next.body.usdRate)).toBe(7250);
+    });
+
+    it('leaves an earlier period untouched when a later one is corrected', async () => {
+      /*
+       * The whole point, stated as a test. A single current rate would fail this: correcting the
+       * figure for one quarter would restate every USD column in the system, including years that
+       * have been audited and relied on.
+       */
+      const earlier = await create({ label: 'USD 2026', usdRate: 7000 });
+      const later = await create({ label: 'USD 2027', usdRate: 7000 });
+
+      const corrected = await request(server)
+        .patch(`/api/v1/reporting-periods/${later.body.id}`)
+        .set(auth(adminToken))
+        .send({ usdRate: 9500 });
+      expect(corrected.status).toBe(200);
+      expect(Number(corrected.body.usdRate)).toBe(9500);
+
+      const unchanged = await request(server)
+        .get(`/api/v1/reporting-periods/${earlier.body.id}`)
+        .set(auth(adminToken));
+      expect(Number(unchanged.body.usdRate)).toBe(7000);
+    });
+
+    it('records when the rate was set, not only what it is', async () => {
+      // "with a date" was part of the instruction. A rate with no date is a figure nobody can
+      // place against an audit.
+      const before = new Date();
+      const created = await create({ label: 'USD dated', usdRate: 7100 });
+      const setAt = new Date(created.body.usdRateAt as string);
+      expect(setAt.getTime()).toBeGreaterThanOrEqual(before.getTime() - 2000);
+    });
+
+    it.each([
+      ['zero', 0],
+      ['negative', -100],
+    ])('refuses a %s rate', async (_name, usdRate) => {
+      // A rate of zero would make every USD figure zero rather than obviously wrong.
+      const res = await create({ label: `USD bad ${usdRate}`, usdRate });
+      expect(res.status).toBe(400);
+    });
+
+    it('changes nothing for an operator filing a return', async () => {
+      // The rate is the Authority's setting. An operator must not be able to move it, because
+      // moving it moves what every figure in the period is worth.
+      const period = await create({ label: 'USD guarded', usdRate: 7000 });
+      const res = await request(server)
+        .patch(`/api/v1/reporting-periods/${period.body.id}`)
+        .set(auth(opToken))
+        .send({ usdRate: 1 });
+      expect(res.status).toBe(403);
+    });
   });
 });

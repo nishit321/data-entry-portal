@@ -18,6 +18,7 @@ import 'dotenv/config';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { DEFAULT_SMS_ENDPOINT } from '../src/common/constants/app.constants';
+import { keyFrom } from '../src/common/utils/secret-box.util';
 
 type Outcome = 'ok' | 'failed' | 'warn' | 'unknown';
 
@@ -122,6 +123,43 @@ function checkMail() {
   record('mail transport', 'ok', `sending as ${env('MAIL_FROM') || 'no-reply@nca.gov.ss'}`);
 }
 
+function checkTotp() {
+  const key = env('TOTP_ENCRYPTION_KEY');
+  if (!key) {
+    /*
+     * A failure in production, not a warning.
+     *
+     * Q8 is explicit: never rely on SMS alone, offer an authenticator app. Without a key the only
+     * second factor left is a code sent by email, so the portal's sign-in depends on a mail
+     * provider being up. When it is not, nobody signs in at all.
+     */
+    record(
+      'authenticator app',
+      'failed',
+      'no TOTP_ENCRYPTION_KEY, so authenticator apps are unavailable and email is the only second ' +
+        'factor. Generate one with: openssl rand -hex 32',
+    );
+    return;
+  }
+  // The same rule the application applies, so preflight and startup cannot disagree.
+  try {
+    keyFrom(key);
+  } catch (error) {
+    record(
+      'authenticator app',
+      'failed',
+      error instanceof Error ? error.message : 'TOTP_ENCRYPTION_KEY is not a usable key.',
+    );
+    return;
+  }
+  // A key of one repeated character is somebody filling the field in to make the check pass.
+  if (new Set(key.toLowerCase()).size <= 2) {
+    record('authenticator app', 'failed', 'that key is a placeholder, not a key.');
+    return;
+  }
+  record('authenticator app', 'ok', 'TOTP secrets are encrypted at rest');
+}
+
 function checkSms() {
   const token = env('SMS_API_TOKEN');
   const sender = env('SMS_SENDER_ID');
@@ -147,6 +185,26 @@ function checkSms() {
     record('SMS gateway', 'failed', `sender ID "${sender}" is longer than 11 characters.`);
     return;
   }
+  /*
+   * Characters beyond letters, digits, spaces and hyphens are a trap, and this one was paid for.
+   *
+   * `NCA-M&E` was ACTIVE on the vendor's own panel and refused every message with `403 Failed`,
+   * while `XTECH` — same account, same request — was delivered. Worse, it delivered some of the
+   * "failed" ones anyway, so the failure was not even honest. The hyphen was never the problem;
+   * the ampersand was. So hyphens pass, and anything more exotic is named rather than guessed at.
+   */
+  const odd = [...new Set(sender.replace(/[A-Za-z0-9 -]/g, ''))];
+  if (odd.length > 0 && !/^\+?\d+$/.test(sender)) {
+    record(
+      'SMS gateway',
+      'warn',
+      `sender ID "${sender}" contains ${odd.map((c) => `"${c}"`).join(', ')}. Gateways handle ` +
+        'punctuation inconsistently, and an ampersand silently broke sending on this one. ' +
+        'Letters, digits, spaces and hyphens are safe.',
+    );
+    return;
+  }
+
   record('SMS gateway', 'ok', `sending as ${sender}`);
 }
 
@@ -363,6 +421,7 @@ function main() {
   checkCors();
   checkTlsTermination();
   checkMail();
+  checkTotp();
   checkSms();
   checkMfa();
   checkSeedAccount();

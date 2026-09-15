@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -243,7 +244,7 @@ export function OperatorUsersPage() {
         <span className="font-medium text-gray-900">
           {u.firstName} {u.lastName}
           {u.id === currentUser?.id && (
-            <span className="ml-2 text-xs font-normal text-gray-500">(you)</span>
+            <span className="ms-2 text-xs font-normal text-gray-500">(you)</span>
           )}
         </span>
       ),
@@ -324,7 +325,7 @@ export function OperatorUsersPage() {
       }}
       filters={
         <>
-          <FilterField label="Role" width="lg">
+          <FilterField label={strings.field.role} width="lg">
             <Select
               aria-label="Filter by role"
               value={list.filters.role}
@@ -332,9 +333,9 @@ export function OperatorUsersPage() {
               onChange={(role) => list.setFilters({ role })}
             />
           </FilterField>
-          <FilterField label="Status" width="sm">
+          <FilterField label={strings.field.status} width="sm">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.isActive}
               options={STATUS_FILTER_OPTIONS}
               onChange={(isActive) => list.setFilters({ isActive })}
@@ -373,7 +374,7 @@ export function OperatorUsersPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : (
             <Button variant="secondary" onClick={openCreate}>
@@ -389,7 +390,7 @@ export function OperatorUsersPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField
               htmlFor="firstName"
-              label="First name"
+              label={strings.field.firstName}
               error={errors.firstName?.message}
               required
             >
@@ -397,13 +398,18 @@ export function OperatorUsersPage() {
             </FormField>
             <FormField
               htmlFor="lastName"
-              label="Last name"
+              label={strings.field.lastName}
               error={errors.lastName?.message}
               required
             >
               {(field) => <Input {...field} placeholder="e.g. Deng" {...register('lastName')} />}
             </FormField>
-            <FormField htmlFor="email" label="Email" error={errors.email?.message} required>
+            <FormField
+              htmlFor="email"
+              label={strings.field.email}
+              error={errors.email?.message}
+              required
+            >
               {(field) => (
                 <Input
                   type="email"
@@ -413,7 +419,7 @@ export function OperatorUsersPage() {
                 />
               )}
             </FormField>
-            <FormField htmlFor="role" label="Role" error={errors.role?.message}>
+            <FormField htmlFor="role" label={strings.field.role} error={errors.role?.message}>
               {(field) => (
                 <Controller
                   control={control}
@@ -448,7 +454,7 @@ export function OperatorUsersPage() {
           </FormField>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button type="submit" isLoading={createMutation.isPending}>
               Create user
@@ -467,7 +473,7 @@ export function OperatorUsersPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 htmlFor="edit-firstName"
-                label="First name"
+                label={strings.field.firstName}
                 required
                 error={editForm.formState.errors.firstName?.message}
               >
@@ -475,7 +481,7 @@ export function OperatorUsersPage() {
               </FormField>
               <FormField
                 htmlFor="edit-lastName"
-                label="Last name"
+                label={strings.field.lastName}
                 required
                 error={editForm.formState.errors.lastName?.message}
               >
@@ -484,14 +490,14 @@ export function OperatorUsersPage() {
             </div>
 
             {/* Email is the login identity and is changed through a separate verified flow. */}
-            <FormField htmlFor="edit-email" label="Email">
+            <FormField htmlFor="edit-email" label={strings.field.email}>
               {(field) => <Input {...field} value={editing.email} disabled readOnly />}
             </FormField>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 htmlFor="edit-role"
-                label="Role"
+                label={strings.field.role}
                 error={editForm.formState.errors.role?.message}
               >
                 {(field) => (
@@ -511,7 +517,7 @@ export function OperatorUsersPage() {
                   />
                 )}
               </FormField>
-              <FormField htmlFor="edit-status" label="Status">
+              <FormField htmlFor="edit-status" label={strings.field.status}>
                 {(field) => (
                   <Controller
                     control={editForm.control}
@@ -532,7 +538,7 @@ export function OperatorUsersPage() {
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
-                Cancel
+                {strings.action.cancel}
               </Button>
               <Button type="submit" isLoading={editMutation.isPending}>
                 Save changes

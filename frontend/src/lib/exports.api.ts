@@ -1,4 +1,5 @@
 import { api } from './api';
+import { fileNameFromDisposition, saveBlob } from './download';
 
 /** Filters accepted by the export endpoints (mirroring the screens they come from). */
 export interface ExportParams {
@@ -17,18 +18,7 @@ async function downloadFile(path: string, params: ExportParams, fallbackName: st
   const res = await api.get<Blob>(path, { params, responseType: 'blob' });
 
   // Prefer the server's filename (it carries the generation date) and fall back if absent.
-  const disposition = String(res.headers['content-disposition'] ?? '');
-  const match = /filename="?([^"]+)"?/.exec(disposition);
-  const fileName = match?.[1] ?? fallbackName;
-
-  const url = URL.createObjectURL(res.data);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  saveBlob(res.data, fileNameFromDisposition(res.headers['content-disposition'], fallbackName));
 }
 
 export const exportsApi = {

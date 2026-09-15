@@ -71,7 +71,7 @@ export function NotificationBell() {
       >
         <Bell size={20} aria-hidden />
         {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-danger-600 px-1 text-[10px] font-semibold leading-4 text-white">
+          <span className="absolute -end-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-danger-600 px-1 text-[10px] font-semibold leading-4 text-white">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
@@ -111,7 +111,7 @@ export function NotificationBell() {
                   <button
                     type="button"
                     onClick={() => openItem(n)}
-                    className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50 ${
+                    className={`flex w-full gap-3 px-4 py-3 text-start hover:bg-gray-50 focus:outline-none focus-visible:bg-gray-50 ${
                       n.readAt ? '' : 'bg-brand-50/40'
                     }`}
                   >

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -219,9 +220,9 @@ export function TemplatesPage() {
         label: 'Search templates',
       }}
       filters={
-        <FilterField label="Status" width="md">
+        <FilterField label={strings.field.status} width="md">
           <Select
-            aria-label="Filter by status"
+            aria-label={strings.filter.byStatus}
             value={list.filters.status}
             options={STATUS_FILTER_OPTIONS}
             onChange={(status) => list.setFilters({ status })}
@@ -263,7 +264,7 @@ export function TemplatesPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : (
             <Button variant="secondary" onClick={openCreate}>
@@ -280,7 +281,7 @@ export function TemplatesPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button type="submit" form="new-template-form" isLoading={createMutation.isPending}>
               Create template
@@ -294,7 +295,12 @@ export function TemplatesPage() {
           className="space-y-4"
         >
           {createError && <Alert tone="danger">{createError}</Alert>}
-          <FormField htmlFor="name" label="Name" error={errors.name?.message} required>
+          <FormField
+            htmlFor="name"
+            label={strings.field.name}
+            error={errors.name?.message}
+            required
+          >
             {(field) => (
               <Input
                 {...field}
@@ -305,7 +311,7 @@ export function TemplatesPage() {
           </FormField>
           <FormField
             htmlFor="description"
-            label="Description (optional)"
+            label={strings.field.descriptionOptional}
             error={errors.description?.message}
           >
             {(field) => (

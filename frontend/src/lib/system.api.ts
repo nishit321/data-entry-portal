@@ -11,7 +11,21 @@ const HEALTH_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api/v
 
 /** One background job's schedule and what its last run did. */
 export interface JobStatus {
-  name: 'compliance-sweep' | 'document-expiry' | 'notification-retry';
+  /**
+   * Every job the scheduler runs — all seven, matching `JobName` on the server.
+   *
+   * It listed three for a while, and the four it left out still arrived: the screen rendered them
+   * with no name and no explanation, so an administrator saw a "Run now" button beside a blank
+   * line. TypeScript could not object, because the values were coming off the wire.
+   */
+  name:
+    | 'compliance-sweep'
+    | 'document-expiry'
+    | 'notification-retry'
+    | 'penalty-accrual'
+    | 'scheduled-reports'
+    | 'nonce-sweep'
+    | 'network-feeds';
   cron: string;
   running: boolean;
   lastRun: {

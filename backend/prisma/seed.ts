@@ -3,13 +3,18 @@ import {
   EntityType,
   FieldType,
   FlowOrStock,
+  NetworkSiteKind,
+  NetworkSiteStatus,
   PeriodStatus,
+  Prisma,
   PrismaClient,
+  PublicAggregation,
   ReferenceCategory,
   ReportingFrequency,
   Role,
   RuleSeverity,
   RuleType,
+  SubmissionStatus,
   TemplateStatus,
 } from '@prisma/client';
 import { hashPassword } from '../src/common/utils/password.util';
@@ -343,6 +348,13 @@ async function seedSampleTemplate() {
                   isMandatory: true,
                   flowOrStock: FlowOrStock.FLOW_ENTERED,
                   minValue: 0,
+                  /*
+                   * The figure the levy is charged on, and the one a percentage penalty is a share
+                   * of. Without it the levy screen assesses every operator at zero and looks broken
+                   * on a fresh database — which it did, until a separate demo script had to patch
+                   * it in by hand afterwards.
+                   */
+                  isLevyBasis: true,
                 },
                 {
                   key: 'capex',
@@ -444,11 +456,340 @@ async function seedSamplePeriod() {
       periodEnd: new Date('2026-03-31'),
       dueDate: new Date('2026-04-15'),
       graceDays: 5,
+      /*
+       * SSP per USD for this cycle. NCA's figure, given on 3 September 2026.
+       *
+       * Seeded so a fresh database shows the two-currency view working rather than a column of
+       * dashes. The rate lives on the period for the reason NCA gave: updating today's rate must
+       * never restate a year that has already been audited.
+       */
+      usdRate: 7000,
+      usdRateAt: new Date(),
       status: PeriodStatus.OPEN,
       openedAt: new Date(),
     },
   });
   console.log(`Seeded sample reporting period: ${label} (open, due 2026-04-15)`);
+}
+
+/**
+ * Enough published history for the public open-data page to have something on it.
+ *
+ * Without this the page is correct and empty, because nothing is published until NCA puts a figure
+ * on the allowlist and no figure exists until a period has been closed with approved returns
+ * behind it. Correct and empty is a poor thing to demonstrate, and it hides the two behaviours
+ * that are worth seeing.
+ *
+ * So the data is chosen to show both of them at once:
+ *
+ *  - Two closed quarters, so a figure has a direction and the period filter has a choice to make.
+ *  - Four operators reporting subscribers and coverage, which is above the disclosure threshold,
+ *    so those figures publish.
+ *  - One operator reporting capital expenditure, which is below it, so that figure is withheld.
+ *    A demonstration where nothing is ever withheld does not show the rule working at all.
+ */
+async function seedPublicPortal() {
+  const template = await prisma.reportingTemplate.findFirst({
+    where: { name: 'ICT Indicators Return', status: TemplateStatus.PUBLISHED },
+    select: {
+      id: true,
+      sections: { select: { fields: { select: { id: true, key: true } } } },
+    },
+  });
+  if (!template) {
+    console.log('Sample template not published yet, skipping the public portal data.');
+    return;
+  }
+
+  const fields = new Map(
+    template.sections.flatMap((section) => section.fields.map((f) => [f.key, f.id] as const)),
+  );
+  const fieldId = (key: string) => fields.get(key);
+
+  // The demo operator plus three more, so a sector total rests on enough of them to publish.
+  const peers = [
+    { licence: 'NCA/ISP/2026/002', name: 'Nile Connect (ISP)', type: EntityType.ISP },
+    { licence: 'NCA/MNO/2026/003', name: 'Equatoria Mobile (MNO)', type: EntityType.MNO },
+    { licence: 'NCA/MNO/2026/004', name: 'Bahr Telecom (MNO)', type: EntityType.MNO },
+  ];
+
+  const entities = [
+    await prisma.entity.findUniqueOrThrow({
+      where: { licenceNumber: 'NCA/MNO/2026/001' },
+      select: { id: true },
+    }),
+  ];
+  for (const peer of peers) {
+    entities.push(
+      await prisma.entity.upsert({
+        where: { licenceNumber: peer.licence },
+        update: {},
+        create: {
+          name: peer.name,
+          type: peer.type,
+          status: EntityStatus.ACTIVE,
+          licenceNumber: peer.licence,
+          geographicScope: 'National',
+          headquartersAddress: 'Juba, South Sudan',
+        },
+        select: { id: true },
+      }),
+    );
+  }
+
+  /*
+   * A user per operator, rather than attributing every return to the demo account.
+   *
+   * A return records who filed it, and a case file that says one company's officer filed another
+   * company's return is the kind of detail that costs a demonstration its credibility.
+   */
+  const filedBy: string[] = [];
+  const passwordHash = await hashPassword('Operator@12345');
+  for (let i = 0; i < entities.length; i += 1) {
+    const email = i === 0 ? 'operator@demo-telecom.ss' : `operator${i + 1}@demo-telecom.ss`;
+    const user = await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        email,
+        passwordHash,
+        firstName: 'Demo',
+        lastName: `Operator ${i + 1}`,
+        role: Role.OPERATOR_ADMIN,
+        entityId: entities[i].id,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    filedBy.push(user.id);
+  }
+
+  /** Two closed quarters, oldest first, with the figures each operator reported in them. */
+  const quarters = [
+    {
+      label: '2025 Q3',
+      start: new Date('2025-07-01'),
+      end: new Date('2025-09-30'),
+      due: new Date('2025-10-15'),
+      subscribers: [820_000, 310_000, 455_000, 180_000],
+      coverage: [61, 44, 53, 38],
+      // Reported by the first operator alone, which is what puts it below the threshold.
+      capex: [4_200_000_000, null, null, null],
+    },
+    {
+      label: '2025 Q4',
+      start: new Date('2025-10-01'),
+      end: new Date('2025-12-31'),
+      due: new Date('2026-01-15'),
+      subscribers: [905_000, 344_000, 498_000, 205_000],
+      coverage: [64, 47, 56, 41],
+      capex: [5_100_000_000, null, null, null],
+    },
+  ];
+
+  let reference = 250_000;
+  for (const quarter of quarters) {
+    const existing = await prisma.reportingPeriod.findFirst({
+      where: { templateId: template.id, label: quarter.label },
+      select: { id: true },
+    });
+    if (existing) {
+      console.log(`Closed period already exists: ${quarter.label}`);
+      continue;
+    }
+
+    const period = await prisma.reportingPeriod.create({
+      data: {
+        templateId: template.id,
+        frequency: ReportingFrequency.QUARTERLY,
+        label: quarter.label,
+        periodStart: quarter.start,
+        periodEnd: quarter.end,
+        dueDate: quarter.due,
+        graceDays: 5,
+        usdRate: 6500,
+        usdRateAt: quarter.due,
+        status: PeriodStatus.CLOSED,
+        openedAt: quarter.start,
+        closedAt: quarter.due,
+      },
+      select: { id: true },
+    });
+
+    for (let i = 0; i < entities.length; i += 1) {
+      const values: { fieldId: string; valueText: string }[] = [];
+      const add = (key: string, value: number | null) => {
+        const id = fieldId(key);
+        if (id && value !== null) values.push({ fieldId: id, valueText: String(value) });
+      };
+      add('active_subscribers_mobile', quarter.subscribers[i]);
+      add('urban_coverage_pct', quarter.coverage[i]);
+      add('capex', quarter.capex[i]);
+      // The levy basis, so the levy screen has closed quarters to assess as well.
+      add('total_revenue', quarter.subscribers[i] * 1_200);
+
+      await prisma.submission.create({
+        data: {
+          entityId: entities[i].id,
+          periodId: period.id,
+          templateId: template.id,
+          createdById: filedBy[i],
+          status: SubmissionStatus.APPROVED,
+          isLate: false,
+          submittedAt: quarter.due,
+          lockedAt: quarter.due,
+          referenceNumber: `NCA/SUB/${quarter.label.slice(0, 4)}/${String(++reference).padStart(6, '0')}`,
+          values: { create: values },
+        },
+      });
+    }
+    console.log(`Seeded closed period ${quarter.label} with ${entities.length} approved returns.`);
+  }
+
+  /*
+   * The allowlist. Nothing is public until a figure is on it, so a demonstration of the public
+   * page needs entries here or it has nothing to show.
+   */
+  const published = [
+    {
+      fieldKey: 'active_subscribers_mobile',
+      aggregation: PublicAggregation.SUM,
+      label: 'Mobile subscribers',
+      unit: 'subscribers',
+      description: 'Active mobile subscriptions across all licensed operators.',
+      order: 1,
+    },
+    {
+      fieldKey: 'urban_coverage_pct',
+      aggregation: PublicAggregation.AVERAGE,
+      label: 'Urban population covered',
+      unit: '%',
+      description: 'Share of the urban population within reach of a mobile network, averaged.',
+      order: 2,
+    },
+    {
+      fieldKey: 'capex',
+      aggregation: PublicAggregation.SUM,
+      label: 'Capital investment',
+      unit: 'SSP',
+      description: 'What operators spent on building and upgrading their networks.',
+      order: 3,
+    },
+  ];
+
+  for (const indicator of published) {
+    const existing = await prisma.publicIndicator.findFirst({
+      where: { fieldKey: indicator.fieldKey, aggregation: indicator.aggregation, deletedAt: null },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.publicIndicator.create({ data: { ...indicator, isPublished: true } });
+  }
+  console.log(`Published ${published.length} sector figures on the open-data page.`);
+}
+
+/**
+ * A few nodes and the fibre between them, so the network map has a network on it.
+ *
+ * Without this the map is a correct and empty grey rectangle, which demonstrates nothing and hides
+ * the one distinction the feature turns on. So there are two routes, deliberately different:
+ *
+ *  - Juba to Yei, with the survey supplied. Drawn solid, as the cable actually runs.
+ *  - Juba to Bor, with no survey. Drawn as a dashed straight line, and labelled as one on the map
+ *    and in the register.
+ *
+ * A demonstration where every route is surveyed would show a map that cannot be wrong, and the
+ * whole point of the dashes is that some of them are.
+ */
+async function seedNetwork() {
+  const entity = await prisma.entity.findUnique({
+    where: { licenceNumber: 'NCA/MNO/2026/001' },
+    select: { id: true },
+  });
+  if (!entity) {
+    console.log('Demo operator not seeded yet, skipping the network map data.');
+    return;
+  }
+
+  const nodes = [
+    { siteReference: 'JUB-FN-01', name: 'Juba exchange', lat: 4.8594, lng: 31.5713 },
+    { siteReference: 'YEI-FN-01', name: 'Yei node', lat: 4.0949, lng: 30.6774 },
+    { siteReference: 'BOR-FN-01', name: 'Bor node', lat: 6.2088, lng: 31.5591 },
+    { siteReference: 'JUB-BTS-01', name: 'Juba central mast', lat: 4.8517, lng: 31.5825 },
+  ];
+
+  const ids = new Map<string, string>();
+  for (const node of nodes) {
+    const site = await prisma.networkSite.upsert({
+      where: {
+        entityId_siteReference: { entityId: entity.id, siteReference: node.siteReference },
+      },
+      update: {},
+      create: {
+        entityId: entity.id,
+        siteReference: node.siteReference,
+        name: node.name,
+        kind: node.siteReference.includes('BTS')
+          ? NetworkSiteKind.BASE_STATION
+          : NetworkSiteKind.FIBRE_NODE,
+        status: NetworkSiteStatus.ACTIVE,
+        latitude: new Prisma.Decimal(node.lat),
+        longitude: new Prisma.Decimal(node.lng),
+        location: node.name.replace(/ (exchange|node|central mast)$/, ''),
+        ...(node.siteReference.includes('BTS') ? { technology: '4G', coverageM: 8000 } : {}),
+      },
+      select: { id: true },
+    });
+    ids.set(node.siteReference, site.id);
+  }
+
+  const routes = [
+    {
+      linkReference: 'JUB-YEI-01',
+      name: 'Juba to Yei backbone',
+      from: 'JUB-FN-01',
+      to: 'YEI-FN-01',
+      lengthKm: 181.4,
+      capacityGbps: 100,
+      // Bends where the cable follows the road rather than the crow.
+      path: [
+        [4.8594, 31.5713],
+        [4.6702, 31.3068],
+        [4.3891, 31.0125],
+        [4.0949, 30.6774],
+      ],
+    },
+    {
+      linkReference: 'JUB-BOR-01',
+      name: 'Juba to Bor link',
+      from: 'JUB-FN-01',
+      to: 'BOR-FN-01',
+      lengthKm: 198.2,
+      capacityGbps: 40,
+      path: null,
+    },
+  ];
+
+  for (const route of routes) {
+    await prisma.fibreLink.upsert({
+      where: {
+        entityId_linkReference: { entityId: entity.id, linkReference: route.linkReference },
+      },
+      update: {},
+      create: {
+        entityId: entity.id,
+        linkReference: route.linkReference,
+        name: route.name,
+        status: NetworkSiteStatus.ACTIVE,
+        fromSiteId: ids.get(route.from)!,
+        toSiteId: ids.get(route.to)!,
+        lengthKm: new Prisma.Decimal(route.lengthKm),
+        capacityGbps: route.capacityGbps,
+        path: route.path ?? Prisma.DbNull,
+      },
+    });
+  }
+  console.log(`Seeded ${nodes.length} network sites and ${routes.length} fibre routes.`);
 }
 
 async function main() {
@@ -458,6 +799,8 @@ async function main() {
   await seedReferenceData();
   await seedSampleTemplate();
   await seedSamplePeriod();
+  await seedPublicPortal();
+  await seedNetwork();
 }
 
 main()

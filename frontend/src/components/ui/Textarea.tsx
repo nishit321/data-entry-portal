@@ -52,7 +52,7 @@ export const Textarea = forwardRef<
       />
       {showCount && maxLength !== undefined && (
         <p
-          className={`mt-1 text-right text-xs ${
+          className={`mt-1 text-end text-xs ${
             length >= maxLength ? 'text-danger-600' : 'text-gray-500'
           }`}
         >

@@ -75,8 +75,11 @@ export default defineConfig({
       // this suite's own — nothing else points at it.
       //
       // `nest start` compiles, so there is no separate build step to forget.
-      command:
-        'npx prisma migrate reset --force --skip-seed && npm run prisma:seed && npm run start',
+      // `db:reset:test` rather than `prisma migrate reset` directly: it reads the database it is
+      // about to destroy and refuses anything that is not a test one. The development database was
+      // rebuilt from scratch during a run of this suite on 5 September 2026 — the override here was
+      // correct and it happened anyway, so the guard lives with the destructive command instead.
+      command: 'npm run db:reset:test && npm run prisma:seed && npm run start',
       cwd: '../backend',
       url: `http://localhost:${API_PORT}/api/health`,
       reuseExistingServer: false,

@@ -71,6 +71,19 @@ export function configureApp(app: INestApplication, corsOrigins?: string[]): voi
   app.useGlobalInterceptors(new LoggingInterceptor());
 
   if (corsOrigins) {
-    app.enableCors({ origin: corsOrigins, credentials: true });
+    app.enableCors({
+      origin: corsOrigins,
+      credentials: true,
+      /*
+       * Content-Disposition is not one of the headers a browser hands to a cross-origin caller by
+       * default, so unless it is named here the client cannot read it and every download falls
+       * back to a generic file name. Every export in the portal puts the date it was taken in that
+       * header, which is what keeps two downloads of the same report apart in a folder, and all of
+       * them had been arriving as the fallback. Found by a browser test asserting the name of a
+       * file it had just downloaded; nothing in the API tests could have seen it, because they are
+       * not a browser and no origin check applies to them.
+       */
+      exposedHeaders: ['Content-Disposition'],
+    });
   }
 }

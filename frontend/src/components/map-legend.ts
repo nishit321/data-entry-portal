@@ -16,6 +16,15 @@ export const MAP_KIND_COLOURS: Record<MapPoint['kind'], string> = {
   AGENT: '#059669',
 };
 
+/**
+ * The colour a fibre route is drawn in, and the colour of one nobody has surveyed.
+ *
+ * The same hue, because they are the same thing on the ground; the difference is carried by the
+ * line style rather than by a second colour, so a reader does not have to learn two entries to
+ * read one layer.
+ */
+export const ROUTE_COLOUR = '#7c3aed';
+
 export const MAP_KIND_LABELS: Record<MapPoint['kind'], string> = {
   BASE_STATION: 'Base station',
   FIBRE_NODE: 'Fibre node',

@@ -110,7 +110,7 @@ export function WorkbookPanel({ submissionId }: { submissionId: string }) {
                   <span className="font-medium text-gray-900">Row {row.rowNumber}</span>
                   {/* The stored key is the sheet's join column, not something to show a person. */}
                   {row.key && (
-                    <span className="ml-2 text-xs text-gray-500">{humaniseKey(row.key)}</span>
+                    <span className="ms-2 text-xs text-gray-500">{humaniseKey(row.key)}</span>
                   )}
                   <p className="mt-0.5 text-gray-600">{row.reason}</p>
                 </li>

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { strings } from '../lib/strings';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ArrowLeft, CheckCircle2, Copy } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Copy, Paperclip, X } from 'lucide-react';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import {
   Alert,
@@ -11,6 +12,7 @@ import {
   Button,
   Field,
   FormField,
+  IconButton,
   Input,
   Select,
   Textarea,
@@ -20,14 +22,24 @@ import {
 import { complaintsApi, type FiledComplaint } from '../lib/complaints.api';
 import { getErrorMessage } from '../lib/api';
 import { COMPLAINT_STATUS_TONE } from '../lib/status';
-import { formatDate } from '../lib/format';
+import { formatDate, formatFileSize, joinMeta } from '../lib/format';
 import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_CATEGORY_LABELS,
+  COMPLAINT_FILE_FORMATS,
   COMPLAINT_STATUS_LABELS,
+  MAX_COMPLAINT_FILES,
   type ComplaintCategory,
   type ComplaintTracking,
 } from '../lib/types';
+
+/**
+ * The per-file size the picker will accept, in bytes.
+ *
+ * A courtesy check, not the check. The server decides, and it may be configured lower; refusing an
+ * obviously oversized file here just saves someone uploading ten megabytes to be told no.
+ */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 const CATEGORY_OPTIONS: SelectOption[] = COMPLAINT_CATEGORIES.map((c) => ({
   value: c,
@@ -58,12 +70,36 @@ export function PublicComplaintPage() {
   const [filed, setFiled] = useState<FiledComplaint | null>(null);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'file' | 'track'>('file');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  /** Files the Authority did not get, named on the receipt rather than swallowed. */
+  const [failedUploads, setFailedUploads] = useState<string[]>([]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { category: 'SERVICE_QUALITY' },
   });
   const { errors, isSubmitting } = form.formState;
+
+  function addFiles(chosen: File[]) {
+    const room = MAX_COMPLAINT_FILES - files.length;
+    if (room <= 0) {
+      toast.error(`You can attach up to ${MAX_COMPLAINT_FILES} files.`);
+      return;
+    }
+    const tooBig = chosen.filter((f) => f.size > MAX_FILE_BYTES);
+    if (tooBig.length > 0) {
+      toast.error(`${tooBig[0].name} is too large. Each file can be up to 10 MB.`);
+    }
+    const room_ = chosen.filter((f) => f.size <= MAX_FILE_BYTES).slice(0, room);
+    if (room_.length > 0) setFiles((current) => [...current, ...room_]);
+  }
+
+  function onFilesChosen(event: React.ChangeEvent<HTMLInputElement>) {
+    addFiles(Array.from(event.target.files ?? []));
+    // Clear the input, so choosing the same file again still fires a change event.
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
 
   const onSubmit = form.handleSubmit(async (values) => {
     setError('');
@@ -76,6 +112,24 @@ export function PublicComplaintPage() {
         complainantEmail: values.complainantEmail || undefined,
         complainantPhone: values.complainantPhone || undefined,
       });
+
+      /*
+       * The complaint is filed; the files follow.
+       *
+       * One at a time and never fatal. What has already been recorded is the account of what
+       * happened, and losing that because a photo would not upload would be the worse outcome by
+       * some distance. A file that does not make it is named on the receipt instead, so the sender
+       * knows what the Authority has rather than assuming.
+       */
+      const failed: string[] = [];
+      for (const file of files) {
+        try {
+          await complaintsApi.attach(result.referenceNumber, result.trackingCode, file);
+        } catch {
+          failed.push(file.name);
+        }
+      }
+      setFailedUploads(failed);
       setFiled(result);
     } catch (err) {
       setError(getErrorMessage(err, "We couldn't send that just now. Please try again."));
@@ -125,6 +179,23 @@ export function PublicComplaintPage() {
               {filed.trackingCode}
             </div>
           </div>
+
+          {files.length > 0 && failedUploads.length === 0 && (
+            <p className="text-sm text-gray-600">
+              {files.length === 1
+                ? 'Your file was sent with it.'
+                : `Your ${files.length} files were sent with it.`}
+            </p>
+          )}
+          {failedUploads.length > 0 && (
+            <Alert tone="warning">
+              <p>
+                Your complaint is filed, but we could not attach {failedUploads.join(', ')}.
+                Everything you wrote has been recorded. If the file matters, write to the Authority
+                with your reference number.
+              </p>
+            </Alert>
+          )}
 
           <div className="flex gap-2">
             <Button variant="secondary" icon={Copy} onClick={() => void copyCode()}>
@@ -192,20 +263,87 @@ export function PublicComplaintPage() {
         </FormField>
 
         <div className="rounded-lg border border-gray-200 p-4">
+          <p className="text-sm font-medium text-gray-900">Anything that shows the problem</p>
+          <p className="mt-1 text-xs text-gray-500">
+            A photo, a screenshot or a PDF, such as a bill or a message you were sent. Up to{' '}
+            {MAX_COMPLAINT_FILES} files, 10 MB each. Only the Authority sees them.
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept={COMPLAINT_FILE_FORMATS}
+            onChange={onFilesChosen}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            icon={Paperclip}
+            className="mt-3"
+            disabled={files.length >= MAX_COMPLAINT_FILES}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Choose files
+          </Button>
+
+          {files.length > 0 && (
+            <ul className="mt-3 divide-y divide-gray-100 border-t border-gray-100">
+              {files.map((file, index) => (
+                <li key={`${file.name}-${index}`} className="flex items-center gap-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-gray-900">{file.name}</p>
+                    <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                  </div>
+                  <IconButton
+                    icon={X}
+                    label={`Remove ${file.name}`}
+                    type="button"
+                    onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-4">
           <p className="text-sm font-medium text-gray-900">Your details (optional)</p>
           <p className="mt-1 text-xs text-gray-500">
             Leave these blank to file anonymously. Without them the Authority cannot come back to
             you for more information.
           </p>
           <div className="mt-3 space-y-3">
-            <FormField htmlFor="cmp-name" label="Name" error={errors.complainantName?.message}>
-              <Input id="cmp-name" {...form.register('complainantName')} />
+            <FormField
+              htmlFor="cmp-name"
+              label={strings.field.name}
+              error={errors.complainantName?.message}
+            >
+              <Input
+                id="cmp-name"
+                placeholder="e.g. Mary Deng"
+                {...form.register('complainantName')}
+              />
             </FormField>
-            <FormField htmlFor="cmp-email" label="Email" error={errors.complainantEmail?.message}>
-              <Input id="cmp-email" type="email" {...form.register('complainantEmail')} />
+            <FormField
+              htmlFor="cmp-email"
+              label={strings.field.email}
+              error={errors.complainantEmail?.message}
+            >
+              <Input
+                id="cmp-email"
+                placeholder={strings.example.email}
+                type="email"
+                {...form.register('complainantEmail')}
+              />
             </FormField>
             <FormField htmlFor="cmp-phone" label="Phone" error={errors.complainantPhone?.message}>
-              <Input id="cmp-phone" {...form.register('complainantPhone')} />
+              <Input
+                id="cmp-phone"
+                placeholder="e.g. +211 92 123 4567"
+                {...form.register('complainantPhone')}
+              />
             </FormField>
           </div>
         </div>
@@ -271,7 +409,12 @@ function TrackPanel({ onBack }: { onBack: () => void }) {
           />
         </Field>
         <Field label="Tracking code" htmlFor="track-code">
-          <Input id="track-code" value={code} onChange={(e) => setCode(e.target.value)} />
+          <Input
+            id="track-code"
+            placeholder="The code from your receipt"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
         </Field>
 
         <Button
@@ -295,8 +438,15 @@ function TrackPanel({ onBack }: { onBack: () => void }) {
               </Badge>
             </div>
             <p className="mt-3 text-xs text-gray-500">
-              Filed on {formatDate(result.createdAt)}
-              {result.resolvedAt ? `, closed on ${formatDate(result.resolvedAt)}` : ''}
+              {joinMeta(
+                `Filed on ${formatDate(result.createdAt)}`,
+                result.resolvedAt ? `closed on ${formatDate(result.resolvedAt)}` : null,
+                result.attachmentCount === 0
+                  ? null
+                  : result.attachmentCount === 1
+                    ? '1 file attached'
+                    : `${result.attachmentCount} files attached`,
+              )}
             </p>
             {result.resolutionNote && (
               <p className="mt-3 border-t border-gray-200 pt-3 text-sm text-gray-700">

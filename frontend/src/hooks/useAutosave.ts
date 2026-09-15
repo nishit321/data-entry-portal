@@ -69,7 +69,18 @@ export function useAutosave<T>({
   useEffect(() => {
     if (!enabled) return;
     if (serialised === lastSaved.current) return;
-    const timer = setTimeout(() => void save(), debounceMs);
+    const timer = setTimeout(() => {
+      /*
+       * Checked again here, not only when the timer was set.
+       *
+       * Something may have saved this content in the two seconds in between — an explicit "Save
+       * draft", or `markClean` after a reload — and the pending timer knows nothing about it. It
+       * would then send an identical second request and move the "saved" time for no reason,
+       * which is exactly what this hook promises not to do.
+       */
+      if (JSON.stringify(dataRef.current) === lastSaved.current) return;
+      void save();
+    }, debounceMs);
     return () => clearTimeout(timer);
   }, [serialised, enabled, debounceMs, save]);
 

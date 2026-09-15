@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
@@ -581,7 +582,7 @@ export function SubmissionEditorPage() {
         <div key={field.id} className="space-y-1">
           <p className="text-sm font-medium text-gray-700">
             {field.label}
-            {field.isMandatory && <span className="ml-0.5 text-danger-600">*</span>}
+            {field.isMandatory && <span className="ms-0.5 text-danger-600">*</span>}
           </p>
           {hint && <p className="text-xs text-gray-500">{hint}</p>}
           <div className="text-sm">{renderReadOnlyValue(field)}</div>
@@ -796,6 +797,7 @@ export function SubmissionEditorPage() {
                 >
                   <Textarea
                     id="review-comment"
+                    placeholder="What the operator needs to change"
                     rows={3}
                     autoGrow
                     aria-invalid={!!reviewCommentError || undefined}
@@ -863,7 +865,7 @@ export function SubmissionEditorPage() {
           {!editable && warnings.length > 0 && (
             <Alert tone="warning">
               <p className="font-medium">Notes recorded when this return was submitted:</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              <ul className="mt-1 list-disc space-y-0.5 ps-5">
                 {warnings.map((w, i) => (
                   <li key={`${w.fieldKey}-${i}`}>{w.message}</li>
                 ))}
@@ -957,7 +959,7 @@ export function SubmissionEditorPage() {
                         <button
                           type="button"
                           onClick={() => focusField(w.fieldKey)}
-                          className="text-left underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-danger-500/40"
+                          className="text-start underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-danger-500/40"
                         >
                           {w.message}
                         </button>
@@ -975,7 +977,7 @@ export function SubmissionEditorPage() {
                         <button
                           type="button"
                           onClick={() => focusField(w.fieldKey)}
-                          className="text-left underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-warning-500/40"
+                          className="text-start underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-warning-500/40"
                         >
                           {w.message}
                         </button>
@@ -1071,7 +1073,7 @@ export function SubmissionEditorPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setSignOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               type="button"

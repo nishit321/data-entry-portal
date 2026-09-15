@@ -1,5 +1,13 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { AuditAction, Prisma, ReportFrequency, Role, ScheduledReportKind } from '@prisma/client';
+import {
+  AuditAction,
+  PeriodStatus,
+  Prisma,
+  ReportCoverage,
+  ReportFrequency,
+  Role,
+  ScheduledReportKind,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
@@ -42,6 +50,7 @@ const scheduleSelect = {
   name: true,
   kind: true,
   frequency: true,
+  coverage: true,
   dayOfPeriod: true,
   hour: true,
   isEnabled: true,
@@ -94,6 +103,7 @@ export class ReportsService {
         name: dto.name.trim(),
         kind: dto.kind ?? ScheduledReportKind.COMPLIANCE_WORKBOOK,
         frequency: dto.frequency ?? ReportFrequency.MONTHLY,
+        coverage: dto.coverage ?? ReportCoverage.LAST_CLOSED_PERIOD,
         dayOfPeriod: dto.dayOfPeriod ?? 1,
         hour: dto.hour ?? 7,
         isEnabled: dto.isEnabled ?? true,
@@ -105,6 +115,7 @@ export class ReportsService {
     await this.record(AuditAction.REPORT_SCHEDULE_CREATED, schedule.id, actorId, ctx, {
       kind: schedule.kind,
       frequency: schedule.frequency,
+      coverage: schedule.coverage,
       recipients: recipientIds.length,
     });
     return schedule;
@@ -127,6 +138,7 @@ export class ReportsService {
         name: dto.name?.trim(),
         kind: dto.kind,
         frequency: dto.frequency,
+        coverage: dto.coverage,
         dayOfPeriod: dto.dayOfPeriod,
         hour: dto.hour,
         isEnabled: dto.isEnabled,
@@ -221,17 +233,26 @@ export class ReportsService {
     ctx: RequestContext,
   ) {
     const meta = REPORTS[schedule.kind];
-    const content = await this.build(schedule.kind);
-    const stamp = new Date().toISOString().slice(0, 10);
-    const filename = `${meta.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${stamp}.${meta.extension}`;
+    const window = await this.resolveWindow(schedule.coverage);
+    const content = await this.build(schedule.kind, window.periodId);
+    /*
+     * The window is in the file name, the subject and the body.
+     *
+     * Not decoration. Once a report covers a window that moves, a reader with two of them in an
+     * inbox has no way to tell which is which, and a levy statement filed against the wrong
+     * quarter is a dispute waiting to happen. The date it was sent does not answer the question:
+     * a report sent in April covers the quarter before it.
+     */
+    const slug = `${meta.title} ${window.label}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const filename = `${slug}.${meta.extension}`;
 
     let delivered = 0;
     for (const recipient of schedule.recipients) {
       await this.mail.sendReport({
         to: recipient.user.email,
-        subject: `${schedule.name} (${stamp})`,
+        subject: `${schedule.name} (${window.label})`,
         title: schedule.name,
-        body: `${meta.summary} The report is attached.`,
+        body: `${meta.summary} It covers ${window.label}. The report is attached.`,
         attachment: { filename, content, contentType: meta.contentType },
       });
       delivered += 1;
@@ -243,9 +264,42 @@ export class ReportsService {
     });
     await this.record(AuditAction.REPORT_SCHEDULE_SENT, schedule.id, actorId, ctx, {
       kind: schedule.kind,
+      coverage: schedule.coverage,
+      period: window.label,
       recipients: delivered,
     });
     return delivered;
+  }
+
+  /**
+   * Which period this run covers, decided now rather than when the schedule was made.
+   *
+   * `LAST_CLOSED_PERIOD` with nothing closed yet is refused rather than quietly falling back to
+   * "the latest". A report that silently covers a different window than the one it was set up for
+   * is worse than one that does not arrive: the first is wrong and looks right, and the second
+   * shows up on the schedule's own error line where somebody will see it.
+   */
+  private async resolveWindow(
+    coverage: ReportCoverage,
+  ): Promise<{ periodId?: string; label: string }> {
+    if (coverage === ReportCoverage.LATEST_ACTIVITY) {
+      return { label: 'the latest figures' };
+    }
+
+    const period = await this.prisma.reportingPeriod.findFirst({
+      where: { deletedAt: null, status: PeriodStatus.CLOSED },
+      // By the period's own end date, not by when somebody pressed close. "The period that has
+      // just closed" means the most recent one, and a backlog cleared out of order would otherwise
+      // put a two-year-old quarter at the top of this list.
+      orderBy: { periodEnd: 'desc' },
+      select: { id: true, label: true },
+    });
+    if (!period) {
+      throw new BadRequestException(
+        'This report covers the period that has just closed, and no period has been closed yet.',
+      );
+    }
+    return { periodId: period.id, label: period.label };
   }
 
   /**
@@ -260,16 +314,19 @@ export class ReportsService {
     return { id: 'scheduled-report', email: '', role: Role.ADMIN, entityId: null };
   }
 
-  private build(kind: ScheduledReportKind): Promise<Buffer> {
+  private build(kind: ScheduledReportKind, periodId?: string): Promise<Buffer> {
     const reader = this.authorityReader();
+    // An undefined period is what each export already means by "the latest", so this is the one
+    // query object for both coverages rather than two code paths that could drift apart.
+    const query = { periodId };
     switch (kind) {
       case ScheduledReportKind.LEVY_WORKBOOK:
-        return this.exports.levyWorkbook(reader, {});
+        return this.exports.levyWorkbook(reader, query);
       case ScheduledReportKind.LEVY_STATEMENT:
-        return this.exports.levyPdf(reader, {});
+        return this.exports.levyPdf(reader, query);
       case ScheduledReportKind.COMPLIANCE_WORKBOOK:
       default:
-        return this.exports.complianceWorkbook(reader, {});
+        return this.exports.complianceWorkbook(reader, query);
     }
   }
 

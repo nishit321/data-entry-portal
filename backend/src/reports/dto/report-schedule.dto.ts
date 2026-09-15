@@ -13,7 +13,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { ReportFrequency, ScheduledReportKind } from '@prisma/client';
+import { ReportCoverage, ReportFrequency, ScheduledReportKind } from '@prisma/client';
 
 export class CreateReportScheduleDto {
   @IsString()
@@ -28,6 +28,17 @@ export class CreateReportScheduleDto {
   @IsOptional()
   @IsEnum(ReportFrequency, { message: 'Choose how often it should go out.' })
   frequency?: ReportFrequency;
+
+  /**
+   * Which period each run covers, worked out when it goes out rather than fixed here.
+   *
+   * The distinction a recurring report lives or dies on. A levy statement is about a period that
+   * has finished; a compliance report is about the one still open, because it exists to chase the
+   * operators who have not filed for it.
+   */
+  @IsOptional()
+  @IsEnum(ReportCoverage, { message: 'Choose what each report should cover.' })
+  coverage?: ReportCoverage;
 
   /** Day of the month for a monthly or quarterly report; day of the week for a weekly one. */
   @IsOptional()

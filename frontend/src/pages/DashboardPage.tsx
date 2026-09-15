@@ -138,7 +138,7 @@ function OperatorPanel() {
           </div>
           <Link to="/submissions">
             <Button variant="secondary" size="sm">
-              All returns <ArrowRight size={14} className="ml-1.5" aria-hidden />
+              All returns <ArrowRight size={14} className="ms-1.5" aria-hidden />
             </Button>
           </Link>
         </div>
@@ -211,7 +211,7 @@ function ReviewerPanel() {
         </div>
         <Link to="/review-queue">
           <Button variant="secondary" size="sm">
-            Open the queue <ArrowRight size={14} className="ml-1.5" aria-hidden />
+            Open the queue <ArrowRight size={14} className="ms-1.5" aria-hidden />
           </Button>
         </Link>
       </div>
@@ -298,7 +298,7 @@ function PeriodsPanel() {
           </div>
           <Link to="/reporting-periods">
             <Button variant="secondary" size="sm">
-              All periods <ArrowRight size={14} className="ml-1.5" aria-hidden />
+              All periods <ArrowRight size={14} className="ms-1.5" aria-hidden />
             </Button>
           </Link>
         </div>

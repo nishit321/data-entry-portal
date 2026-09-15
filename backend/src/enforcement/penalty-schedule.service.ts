@@ -13,6 +13,8 @@ const ruleSelect = {
   fixedAmount: true,
   dailyAmount: true,
   maxAmount: true,
+  minAmount: true,
+  percentOfRevenue: true,
   label: true,
   effectiveFrom: true,
   effectiveTo: true,
@@ -20,6 +22,12 @@ const ruleSelect = {
 } satisfies Prisma.PenaltyRuleSelect;
 
 export type PenaltyRuleRow = Prisma.PenaltyRuleGetPayload<{ select: typeof ruleSelect }>;
+
+/** Just the amounts, for a caller that priced a case and selected nothing else. */
+export type PenaltyTermsRow = Pick<
+  PenaltyRuleRow,
+  'fixedAmount' | 'dailyAmount' | 'maxAmount' | 'minAmount' | 'percentOfRevenue'
+>;
 
 /**
  * NCA Legal & Licensing's penalty schedule, held as configuration (Q3).
@@ -46,7 +54,7 @@ export class PenaltyScheduleService {
 
   async create(dto: CreatePenaltyRuleDto, actorId: string, ctx: RequestContext) {
     const { from, to } = this.parseWindow(dto.effectiveFrom, dto.effectiveTo);
-    this.assertAmounts(dto.fixedAmount, dto.dailyAmount, dto.maxAmount);
+    this.assertAmounts(dto);
 
     const rule = await this.prisma.penaltyRule.create({
       data: {
@@ -55,6 +63,9 @@ export class PenaltyScheduleService {
         fixedAmount: new Prisma.Decimal(dto.fixedAmount ?? 0),
         dailyAmount: new Prisma.Decimal(dto.dailyAmount ?? 0),
         maxAmount: dto.maxAmount === undefined ? null : new Prisma.Decimal(dto.maxAmount),
+        minAmount: dto.minAmount === undefined ? null : new Prisma.Decimal(dto.minAmount),
+        percentOfRevenue:
+          dto.percentOfRevenue === undefined ? null : new Prisma.Decimal(dto.percentOfRevenue),
         label: dto.label?.trim() || null,
         effectiveFrom: from,
         effectiveTo: to,
@@ -76,6 +87,8 @@ export class PenaltyScheduleService {
         fixedAmount: true,
         dailyAmount: true,
         maxAmount: true,
+        minAmount: true,
+        percentOfRevenue: true,
       },
     });
     if (!existing) throw new NotFoundException('Penalty schedule line not found');
@@ -88,11 +101,14 @@ export class PenaltyScheduleService {
     const { from, to } = this.parseWindow(fromStr, toStr);
     // Validate the line as it will stand after the change, not just the fields that were sent:
     // an update that only renames the line must not be judged as if it zeroed the amounts.
-    this.assertAmounts(
-      dto.fixedAmount ?? Number(existing.fixedAmount),
-      dto.dailyAmount ?? Number(existing.dailyAmount),
-      dto.maxAmount ?? (existing.maxAmount === null ? undefined : Number(existing.maxAmount)),
-    );
+    const orUndefined = (v: unknown) => (v === null || v === undefined ? undefined : Number(v));
+    this.assertAmounts({
+      fixedAmount: dto.fixedAmount ?? Number(existing.fixedAmount),
+      dailyAmount: dto.dailyAmount ?? Number(existing.dailyAmount),
+      maxAmount: dto.maxAmount ?? orUndefined(existing.maxAmount),
+      minAmount: dto.minAmount ?? orUndefined(existing.minAmount),
+      percentOfRevenue: dto.percentOfRevenue ?? orUndefined(existing.percentOfRevenue),
+    });
 
     const rule = await this.prisma.penaltyRule.update({
       where: { id },
@@ -104,6 +120,9 @@ export class PenaltyScheduleService {
         dailyAmount:
           dto.dailyAmount === undefined ? undefined : new Prisma.Decimal(dto.dailyAmount),
         maxAmount: dto.maxAmount === undefined ? undefined : new Prisma.Decimal(dto.maxAmount),
+        minAmount: dto.minAmount === undefined ? undefined : new Prisma.Decimal(dto.minAmount),
+        percentOfRevenue:
+          dto.percentOfRevenue === undefined ? undefined : new Prisma.Decimal(dto.percentOfRevenue),
         label: dto.label?.trim(),
         effectiveFrom: dto.effectiveFrom ? from : undefined,
         effectiveTo: dto.effectiveTo === undefined ? undefined : to,
@@ -162,12 +181,28 @@ export class PenaltyScheduleService {
     );
   }
 
-  /** A stored rule as the arithmetic in `penalty-assessment` needs it. */
-  static toTerms(rule: PenaltyRuleRow): PenaltyTerms {
+  /**
+   * A stored rule as the arithmetic in `penalty-assessment` needs it.
+   *
+   * Takes only the terms, not a whole row: the callers that price a case select the schedule's
+   * amounts and nothing else, and demanding the full row would push them into selecting columns
+   * they have no use for — or, as happened, into rebuilding the terms by hand and leaving one out.
+   */
+  static toTerms(rule: PenaltyTermsRow): PenaltyTerms {
     return {
       fixedAmount: Number(rule.fixedAmount),
       dailyAmount: Number(rule.dailyAmount),
-      maxAmount: rule.maxAmount === null ? null : Number(rule.maxAmount),
+      /*
+       * `== null`, catching undefined as well as null.
+       *
+       * `=== null` looked equivalent and was not: a caller whose select omits a column hands over
+       * `undefined`, which slips past a strict null check into `Number(undefined)` — NaN. A NaN
+       * percentage then looks like a percentage line and prices the case at zero, confidently. The
+       * existing tests caught it, which is the only reason it is not in this file.
+       */
+      maxAmount: rule.maxAmount == null ? null : Number(rule.maxAmount),
+      minAmount: rule.minAmount == null ? null : Number(rule.minAmount),
+      percentOfRevenue: rule.percentOfRevenue == null ? null : Number(rule.percentOfRevenue),
     };
   }
 
@@ -202,12 +237,46 @@ export class PenaltyScheduleService {
    * reachable. Both are mistakes that only show up when a real case is priced, which is far too
    * late to find them.
    */
-  private assertAmounts(fixed?: number, daily?: number, max?: number) {
-    if (max !== undefined && max < (fixed ?? 0)) {
+  /**
+   * A schedule line has to be one instrument or the other, and has to be some instrument.
+   *
+   * NCA's schedule has two shapes. Tier 1 runs on time — a fixed charge and so much a day. Tiers 2
+   * and 3 run on size — a share of the operator's audited annual revenue. The arithmetic prices a
+   * percentage line on the share alone, so a line carrying both would have its fixed and daily
+   * amounts silently discarded. Refusing the combination is better than accepting a figure and
+   * then not using it.
+   */
+  private assertAmounts(dto: {
+    fixedAmount?: number;
+    dailyAmount?: number;
+    maxAmount?: number;
+    minAmount?: number;
+    percentOfRevenue?: number;
+  }) {
+    const fixed = dto.fixedAmount ?? 0;
+    const daily = dto.dailyAmount ?? 0;
+    const percent = dto.percentOfRevenue;
+
+    if (percent !== undefined && percent > 0 && (fixed > 0 || daily > 0)) {
+      throw new BadRequestException(
+        'A line is either a share of revenue or an amount per day, not both. Enter the ' +
+          'percentage on its own, or clear it and use the fixed and daily amounts.',
+      );
+    }
+    if ((percent === undefined || percent === 0) && fixed === 0 && daily === 0) {
+      throw new BadRequestException(
+        'Set a fixed amount, a daily amount, or a percentage of revenue.',
+      );
+    }
+    if (dto.maxAmount !== undefined && dto.maxAmount < fixed) {
       throw new BadRequestException('The maximum cannot be less than the fixed amount.');
     }
-    if ((fixed ?? 0) === 0 && (daily ?? 0) === 0) {
-      throw new BadRequestException('Set a fixed amount, a daily amount, or both.');
+    if (
+      dto.minAmount !== undefined &&
+      dto.maxAmount !== undefined &&
+      dto.minAmount > dto.maxAmount
+    ) {
+      throw new BadRequestException('The minimum cannot be more than the maximum.');
     }
   }
 }

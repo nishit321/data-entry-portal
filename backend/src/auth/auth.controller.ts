@@ -15,12 +15,15 @@ import { ClientContext } from '../common/decorators/client-context.decorator';
 import { RequestContext } from '../common/utils/request-context.util';
 import { PhoneVerificationService } from './phone-verification.service';
 import { ConfirmPhoneDto, StartPhoneVerificationDto } from './dto/phone.dto';
+import { TotpService } from './totp.service';
+import { TotpCodeDto } from './dto/totp.dto';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly phone: PhoneVerificationService,
+    private readonly totp: TotpService,
   ) {}
 
   @Public()
@@ -118,5 +121,60 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   removePhone(@CurrentUser('id') userId: string, @ClientContext() ctx: RequestContext) {
     return this.phone.remove(userId, ctx);
+  }
+
+  /*
+   * The authenticator app (Q8). Like the phone routes, each of these acts on the caller's own
+   * account and nobody else's, so they carry no @Roles(); the reasons are written down in
+   * test/route-inventory.e2e-spec.ts.
+   */
+
+  @Get('totp')
+  totpStatus(@CurrentUser('id') userId: string) {
+    return this.totp.status(userId);
+  }
+
+  /** Mint a secret and hand back something to scan. Does not switch the factor on. */
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('totp')
+  beginTotpEnrolment(@CurrentUser('id') userId: string) {
+    return this.totp.beginEnrolment(userId);
+  }
+
+  /** A correct code switches it on, and returns the recovery codes for the only time. */
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('totp/confirm')
+  confirmTotp(
+    @CurrentUser('id') userId: string,
+    @Body() dto: TotpCodeDto,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.totp.confirmEnrolment(userId, dto.code, ctx);
+  }
+
+  /** Fresh codes, invalidating the old set. A current code is required. */
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('totp/recovery-codes')
+  regenerateRecoveryCodes(
+    @CurrentUser('id') userId: string,
+    @Body() dto: TotpCodeDto,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.totp.regenerateRecoveryCodes(userId, dto.code, ctx);
+  }
+
+  /**
+   * Turn it off. A current code is required even though the caller is signed in: otherwise a
+   * session left open on a shared machine is enough to strip the second factor off an account.
+   */
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('totp')
+  disableTotp(
+    @CurrentUser('id') userId: string,
+    @Body() dto: TotpCodeDto,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.totp.disable(userId, dto.code, ctx);
   }
 }

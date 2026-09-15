@@ -3,6 +3,7 @@ import { ComplaintCategory, ComplaintStatus, Role } from '@prisma/client';
 import { ComplaintsService } from './complaints.service';
 import { hashToken } from '../common/utils/token.util';
 import { AuthUser } from '../common/decorators/current-user.decorator';
+import { UploadedFile } from '../files/storage.service';
 
 const CTX = { ipAddress: '127.0.0.1', userAgent: 'test', requestId: 'r1' };
 const admin: AuthUser = { id: 'admin', email: 'a@nca.ss', role: Role.ADMIN, entityId: null };
@@ -22,6 +23,12 @@ function buildService(over: Record<string, unknown> = {}) {
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
     },
+    complaintAttachment: {
+      create: jest.fn((args: { select: unknown }) => Promise.resolve({ id: 'att1', ...args })),
+      findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(),
+    },
     entity: { findFirst: jest.fn(), findUnique: jest.fn() },
     $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
     ...over,
@@ -31,8 +38,22 @@ function buildService(over: Record<string, unknown> = {}) {
     complaintReceived: jest.fn().mockResolvedValue(undefined),
     complaintStatusChanged: jest.fn().mockResolvedValue(undefined),
   };
-  const service = new ComplaintsService(prisma as never, audit as never, notifications as never);
-  return { service, prisma, audit, notifications };
+  const storage = {
+    save: jest.fn().mockResolvedValue('complaints/c1/stored.jpg'),
+    stream: jest.fn(),
+  };
+  // 25 MB is the shipped default for MAX_FILE_MB; the service caps the public route below it.
+  const config = {
+    get: jest.fn().mockReturnValue({ dir: 'storage', maxFileBytes: 25 * 1024 * 1024 }),
+  };
+  const service = new ComplaintsService(
+    prisma as never,
+    audit as never,
+    notifications as never,
+    storage as never,
+    config as never,
+  );
+  return { service, prisma, audit, notifications, storage };
 }
 
 describe('ComplaintsService.file', () => {
@@ -71,11 +92,12 @@ describe('ComplaintsService.file', () => {
 });
 
 describe('ComplaintsService.track', () => {
-  const stored = (code: string) => ({
+  const stored = (code: string, attachments = 0) => ({
     referenceNumber: 'NCA/CMP/2026/000001',
     status: ComplaintStatus.RECEIVED,
     subject: 'No signal',
     trackingCodeHash: hashToken(code),
+    _count: { attachments },
   });
 
   it('returns the complaint when the reference and code both match', async () => {
@@ -117,6 +139,157 @@ describe('ComplaintsService.track', () => {
 
     // Identical wording, so the endpoint cannot be used to discover which references exist.
     expect(a).toBe(b);
+  });
+
+  it('says how many files arrived without handing any of them back', async () => {
+    const { service } = buildService({
+      complaint: { findUnique: jest.fn().mockResolvedValue(stored('right-code', 2)) },
+    });
+    const result = await service.track({
+      referenceNumber: 'NCA/CMP/2026/000001',
+      trackingCode: 'right-code',
+    });
+
+    // The sender's question is whether their photo arrived. A count answers it; a list of files,
+    // or anything that could be turned into one, would make the tracking code a read credential
+    // for material the Authority holds on the case.
+    expect(result.attachmentCount).toBe(2);
+    expect(JSON.stringify(result)).not.toContain('storageKey');
+    expect(JSON.stringify(result)).not.toContain('fileName');
+  });
+});
+
+describe('ComplaintsService.attach', () => {
+  /*
+   * "Public Complaints: Incorporate an attachment upload option." (NCA, 15 September 2026)
+   *
+   * The route writes a file to disk for a caller who has not signed in, so what these tests hold
+   * is the set of things standing between an anonymous request and the Authority's storage: the
+   * credential, the case still being open, a count, a size, a format, and a stored content type
+   * that the sender did not choose.
+   */
+  const PNG = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(64),
+  ]);
+  const upload = (over: Partial<UploadedFile> = {}): UploadedFile => ({
+    originalname: 'mast.png',
+    mimetype: 'image/png',
+    size: PNG.length,
+    buffer: PNG,
+    ...over,
+  });
+  const onFile = (over: Record<string, unknown> = {}) => ({
+    complaint: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'c1',
+        referenceNumber: 'NCA/CMP/2026/000001',
+        status: ComplaintStatus.RECEIVED,
+        trackingCodeHash: hashToken('right-code'),
+        _count: { attachments: 0 },
+        ...over,
+      }),
+    },
+  });
+
+  it('stores the file and records it against the case', async () => {
+    const { service, prisma, storage, audit } = buildService(onFile());
+    await service.attach('NCA/CMP/2026/000001', 'right-code', upload(), CTX);
+
+    expect(storage.save).toHaveBeenCalledWith(PNG, 'complaints/c1', 'mast.png');
+    const written = (prisma.complaintAttachment.create as jest.Mock).mock.calls[0][0].data;
+    expect(written.complaintId).toBe('c1');
+    expect(written.storageKey).toBe('complaints/c1/stored.jpg');
+    // Nobody signed in, so the entry has no actor — the same footing as the filing itself.
+    const entry = (audit.record as jest.Mock).mock.calls[0][0];
+    expect(entry.actorId).toBeNull();
+    expect(entry.entityId).toBe('NCA/CMP/2026/000001');
+  });
+
+  it('stores the type read from the file name, not the one the uploader declared', async () => {
+    const { service, prisma } = buildService(onFile());
+    // A PNG by name and by its bytes, announced as something a browser would run.
+    await service.attach(
+      'NCA/CMP/2026/000001',
+      'right-code',
+      upload({ mimetype: 'text/html' }),
+      CTX,
+    );
+
+    const written = (prisma.complaintAttachment.create as jest.Mock).mock.calls[0][0].data;
+    expect(written.mimeType).toBe('image/png');
+  });
+
+  it('refuses the wrong tracking code in the same words as an unknown reference', async () => {
+    const wrongCode = buildService(onFile());
+    const unknownRef = buildService({
+      complaint: { findUnique: jest.fn().mockResolvedValue(null) },
+    });
+
+    const a = await wrongCode.service
+      .attach('NCA/CMP/2026/000001', 'guessed', upload(), CTX)
+      .catch((e: Error) => e.message);
+    const b = await unknownRef.service
+      .attach('NCA/CMP/2026/999999', 'guessed', upload(), CTX)
+      .catch((e: Error) => e.message);
+
+    expect(a).toBe(b);
+  });
+
+  it('writes nothing when the code is wrong', async () => {
+    const { service, storage, prisma } = buildService(onFile());
+    await expect(
+      service.attach('NCA/CMP/2026/000001', 'guessed', upload(), CTX),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    // The credential is checked before a byte reaches disk, not after.
+    expect(storage.save).not.toHaveBeenCalled();
+    expect(prisma.complaintAttachment.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses to add files to a closed case', async () => {
+    const { service } = buildService(onFile({ status: ComplaintStatus.CLOSED }));
+    await expect(
+      service.attach('NCA/CMP/2026/000001', 'right-code', upload(), CTX),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('refuses a fourth file', async () => {
+    const { service, storage } = buildService(onFile({ _count: { attachments: 3 } }));
+    await expect(
+      service.attach('NCA/CMP/2026/000001', 'right-code', upload(), CTX),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(storage.save).not.toHaveBeenCalled();
+  });
+
+  it('caps a public upload below the limit set for licensed operators', async () => {
+    /*
+     * MAX_FILE_MB is 25 in the fixture, as it is in the shipped configuration. A return filed by a
+     * named operator may use all of it; this file arrived with no account behind it, so it may not.
+     */
+    const { service } = buildService(onFile());
+    const oversized = upload({ size: 12 * 1024 * 1024 });
+
+    const message = await service
+      .attach('NCA/CMP/2026/000001', 'right-code', oversized, CTX)
+      .catch((e: Error) => e.message);
+    expect(message).toBe('The file is too large. The maximum size is 10 MB.');
+  });
+
+  it('refuses a format a complaint has no use for', async () => {
+    const { service } = buildService(onFile());
+    const spreadsheet = upload({ originalname: 'figures.xlsx', buffer: Buffer.from('PK') });
+    await expect(
+      service.attach('NCA/CMP/2026/000001', 'right-code', spreadsheet, CTX),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('refuses a file that is a PNG in name only', async () => {
+    const { service } = buildService(onFile());
+    const renamed = upload({ buffer: Buffer.from('<html><script>alert(1)</script></html>') });
+    await expect(
+      service.attach('NCA/CMP/2026/000001', 'right-code', renamed, CTX),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 

@@ -26,11 +26,13 @@ describe('Complaints (e2e)', () => {
 
   const PASSWORD = 'Passw0rd!23';
   const adminEmail = 'e2e-cmp-admin@nca.test';
+  const supervisorEmail = 'e2e-cmp-sup@nca.test';
   const opEmail = 'e2e-cmp-op@x.test';
-  const emails = [adminEmail, opEmail];
+  const emails = [adminEmail, supervisorEmail, opEmail];
   const licence = 'E2E/CMP';
 
   let adminToken: string;
+  let supervisorToken: string;
   let opToken: string;
   let entityId: string;
   const filedReferences: string[] = [];
@@ -79,6 +81,15 @@ describe('Complaints (e2e)', () => {
         role: Role.ADMIN,
       },
     });
+    await prisma.user.create({
+      data: {
+        email: supervisorEmail,
+        passwordHash,
+        firstName: 'Sup',
+        lastName: 'NCA',
+        role: Role.SUPERVISOR,
+      },
+    });
     const entity = await prisma.entity.create({
       data: {
         name: 'Complaint Target',
@@ -100,6 +111,7 @@ describe('Complaints (e2e)', () => {
     });
 
     adminToken = await login(adminEmail);
+    supervisorToken = await login(supervisorEmail);
     opToken = await login(opEmail);
   });
 
@@ -225,5 +237,187 @@ describe('Complaints (e2e)', () => {
       .set(auth(opToken))
       .send({ status: 'CLOSED' })
       .expect(403);
+  });
+
+  describe('evidence attached to a complaint (NCA, 15 September 2026)', () => {
+    /*
+     * "Public Complaints: Incorporate an attachment upload option."
+     *
+     * This is the portal's only write that puts a file on the Authority's disk for a caller who
+     * has not signed in, so most of what is worth testing here is not the upload succeeding. It is
+     * the shape of the hole: what the credential gets you, what it does not get you, and what a
+     * browser is told about a file a stranger sent in.
+     */
+    const PNG = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from('nca complaint evidence fixture'),
+    ]);
+
+    const attach = (
+      filed: { referenceNumber: string; trackingCode: string },
+      name = 'mast.png',
+      body: Buffer = PNG,
+    ) =>
+      request(server)
+        .post('/api/v1/complaints/attachments')
+        .field('referenceNumber', filed.referenceNumber)
+        .field('trackingCode', filed.trackingCode)
+        .attach('file', body, name);
+
+    /** The internal id, which the public side never learns. */
+    async function caseIdFor(referenceNumber: string): Promise<string> {
+      const row = await prisma.complaint.findUniqueOrThrow({
+        where: { referenceNumber },
+        select: { id: true },
+      });
+      return row.id;
+    }
+
+    it('lets the citizen who filed attach a photograph, and tells them it arrived', async () => {
+      const filed = await fileComplaint();
+      const uploaded = await attach(filed).expect(201);
+      expect(uploaded.body.fileName).toBe('mast.png');
+      expect(uploaded.body.sizeBytes).toBe(PNG.length);
+      // The key stays internal: it is the one field that would let a caller address the blob.
+      expect(uploaded.body.storageKey).toBeUndefined();
+
+      const tracked = await request(server)
+        .post('/api/v1/complaints/track')
+        .send({ referenceNumber: filed.referenceNumber, trackingCode: filed.trackingCode })
+        .expect(201);
+      // A count, and nothing that could be turned into a way to fetch the file back.
+      expect(tracked.body.attachmentCount).toBe(1);
+      expect(JSON.stringify(tracked.body)).not.toContain('mast.png');
+    });
+
+    it('refuses a file from anyone who does not hold the tracking code', async () => {
+      const filed = await fileComplaint();
+      await attach({ referenceNumber: filed.referenceNumber, trackingCode: 'guessed' }).expect(404);
+
+      // Nothing was written, so the count the citizen sees is still zero.
+      const tracked = await request(server)
+        .post('/api/v1/complaints/track')
+        .send({ referenceNumber: filed.referenceNumber, trackingCode: filed.trackingCode })
+        .expect(201);
+      expect(tracked.body.attachmentCount).toBe(0);
+    });
+
+    it('gives the public no way to read a complaint file back', async () => {
+      /*
+       * The point of the design, and the reason there is no public download route at all. A file
+       * that arrives over an unauthenticated route and can be fetched over one is a file host, and
+       * everything else on this case would be reachable by whoever found the URL.
+       */
+      const filed = await fileComplaint();
+      const uploaded = await attach(filed).expect(201);
+      const id = await caseIdFor(filed.referenceNumber);
+      const path = `/api/v1/complaints/${id}/attachments/${uploaded.body.id as string}/download`;
+
+      await request(server).get(`/api/v1/complaints/${id}/attachments`).expect(401);
+      await request(server).get(path).expect(401);
+      // Not even the operator the complaint names: this is the Authority's case file.
+      await request(server).get(path).set(auth(opToken)).expect(403);
+    });
+
+    it('hands the Authority the bytes back, as a download and as the type on the file name', async () => {
+      const filed = await fileComplaint();
+      const uploaded = await attach(filed).expect(201);
+      const id = await caseIdFor(filed.referenceNumber);
+
+      const listed = await request(server)
+        .get(`/api/v1/complaints/${id}/attachments`)
+        .set(auth(adminToken))
+        .expect(200);
+      expect(listed.body).toHaveLength(1);
+      expect(listed.body[0].fileName).toBe('mast.png');
+
+      const res = await request(server)
+        .get(`/api/v1/complaints/${id}/attachments/${uploaded.body.id as string}/download`)
+        .set(auth(adminToken))
+        .expect(200);
+
+      // What comes back is what was sent, byte for byte.
+      expect(Buffer.from(res.body as Buffer).equals(PNG)).toBe(true);
+      // And how it is served. These three headers are the difference between opening a stranger's
+      // file and running it: never inline, never sniffed, never a type the sender chose.
+      expect(res.headers['content-type']).toContain('image/png');
+      expect(res.headers['content-disposition']).toContain('attachment');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+    });
+
+    it('serves the type read from the name, not the one the uploader declared', async () => {
+      const filed = await fileComplaint();
+      // A real PNG, announced by the sender as something a browser would execute.
+      const uploaded = await request(server)
+        .post('/api/v1/complaints/attachments')
+        .field('referenceNumber', filed.referenceNumber)
+        .field('trackingCode', filed.trackingCode)
+        .attach('file', PNG, { filename: 'mast.png', contentType: 'text/html' })
+        .expect(201);
+      expect(uploaded.body.mimeType).toBe('image/png');
+
+      const id = await caseIdFor(filed.referenceNumber);
+      const res = await request(server)
+        .get(`/api/v1/complaints/${id}/attachments/${uploaded.body.id as string}/download`)
+        .set(auth(adminToken))
+        .expect(200);
+      expect(res.headers['content-type']).not.toContain('text/html');
+    });
+
+    it('refuses a file that is a picture in name only', async () => {
+      const filed = await fileComplaint();
+      const res = await attach(filed, 'photo.png', Buffer.from('<html><body>hello</body></html>'));
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/PNG/);
+    });
+
+    it('refuses the formats a complaint has no use for', async () => {
+      const filed = await fileComplaint();
+      const kml = Buffer.from('<?xml version="1.0"?><kml><Document/></kml>');
+      await attach(filed, 'coverage.kml', kml).expect(400);
+    });
+
+    it('stops at three files', async () => {
+      const filed = await fileComplaint();
+      await attach(filed, 'one.png').expect(201);
+      await attach(filed, 'two.png').expect(201);
+      await attach(filed, 'three.png').expect(201);
+      const fourth = await attach(filed, 'four.png');
+      expect(fourth.status).toBe(400);
+      expect(fourth.body.message).toContain('up to 3 files');
+    });
+
+    it('refuses new files once the case is closed', async () => {
+      const filed = await fileComplaint();
+      const id = await caseIdFor(filed.referenceNumber);
+      await request(server)
+        .patch(`/api/v1/complaints/${id}/status`)
+        .set(auth(adminToken))
+        .send({ status: 'CLOSED' })
+        .expect(200);
+
+      const res = await attach(filed);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/closed/i);
+    });
+
+    it('lets an administrator take a file off the case, and nobody below one', async () => {
+      const filed = await fileComplaint();
+      const uploaded = await attach(filed).expect(201);
+      const id = await caseIdFor(filed.referenceNumber);
+      const path = `/api/v1/complaints/${id}/attachments/${uploaded.body.id as string}`;
+
+      // A supervisor works the case and can read the file. Removing evidence from it is a
+      // different act, and it is not theirs.
+      await request(server).get(`${path}/download`).set(auth(supervisorToken)).expect(200);
+      await request(server).delete(path).set(auth(supervisorToken)).expect(403);
+
+      await request(server).delete(path).set(auth(adminToken)).expect(200);
+      const listed = await request(server)
+        .get(`/api/v1/complaints/${id}/attachments`)
+        .set(auth(adminToken))
+        .expect(200);
+      expect(listed.body).toHaveLength(0);
+    });
   });
 });

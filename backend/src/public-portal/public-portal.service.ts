@@ -3,6 +3,7 @@ import {
   ComplaintStatus,
   EntityStatus,
   FieldType,
+  Prisma,
   PublicAggregation,
   SubmissionStatus,
 } from '@prisma/client';
@@ -29,6 +30,13 @@ const NUMERIC_TYPES: FieldType[] = [
   FieldType.PERCENTAGE,
 ];
 
+/** A closed period, as the public filter offers it. A label and a date, nothing else. */
+export interface PublicPeriod {
+  id: string;
+  label: string;
+  dueDate: Date;
+}
+
 /** One period's figure for one published indicator. Never carries an operator. */
 export interface PublicPoint {
   periodId: string;
@@ -39,6 +47,31 @@ export interface PublicPoint {
   contributors: number;
   /** True when there were too few operators to publish without identifying one. */
   withheld: boolean;
+}
+
+/** One published indicator and its series. */
+export interface PublicIndicatorSeries {
+  id: string;
+  label: string;
+  unit: string | null;
+  description: string | null;
+  aggregation: PublicAggregation;
+  points: PublicPoint[];
+}
+
+/**
+ * Everything the public page shows, and everything a public export may contain.
+ *
+ * Named as a type because two more things now render it: the workbook and the PDF. Both take this
+ * object rather than reaching for the database themselves, which is what stops an export from
+ * quietly answering a question the screen would have refused.
+ */
+export interface PublicIndicatorReport {
+  threshold: number;
+  periods: PublicPeriod[];
+  indicators: PublicIndicatorSeries[];
+  /** What the reader filtered by, so an exported file can say what it is a view of. */
+  filters: { from: Date | null; to: Date | null; search: string | null };
 }
 
 /**
@@ -69,9 +102,34 @@ export class PublicPortalService {
    * Returns an empty list until NCA has decided what may be published, which is the correct
    * behaviour rather than a gap: nothing is public by default.
    */
-  async indicators(query: PublicIndicatorQueryDto) {
+  async indicators(query: PublicIndicatorQueryDto = {}): Promise<PublicIndicatorReport> {
+    const from = query.from ? new Date(query.from) : null;
+    const to = query.to ? new Date(query.to) : null;
+    const search = query.search?.trim() || null;
+    const filters = { from, to, search };
+
+    /*
+     * The reader's filters narrow which questions are asked and which periods are covered.
+     *
+     * Neither touches the `submissionValue` query below, which is what decides how many operators
+     * a figure rests on. That is deliberate and it is what keeps the threshold honest: filtering
+     * cannot thin out the contributors behind a published number, so no combination of filters
+     * turns a sector total into one company's return.
+     */
     const indicators = await this.prisma.publicIndicator.findMany({
-      where: { deletedAt: null, isPublished: true },
+      where: {
+        deletedAt: null,
+        isPublished: true,
+        id: query.indicatorId,
+        ...(search
+          ? {
+              OR: [
+                { label: { contains: search, mode: 'insensitive' } },
+                { description: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
       orderBy: [{ order: 'asc' }, { label: 'asc' }],
       select: {
         id: true,
@@ -83,17 +141,26 @@ export class PublicPortalService {
       },
     });
     if (indicators.length === 0) {
-      return { indicators: [], periods: [], threshold: MIN_CONTRIBUTORS };
+      return { indicators: [], periods: [], threshold: MIN_CONTRIBUTORS, filters };
     }
 
+    const dueDate: Prisma.DateTimeFilter = {};
+    if (from) dueDate.gte = from;
+    if (to) dueDate.lte = to;
+
     const periods = await this.prisma.reportingPeriod.findMany({
-      where: { deletedAt: null, status: 'CLOSED' },
+      where: {
+        deletedAt: null,
+        status: 'CLOSED',
+        ...(from || to ? { dueDate } : {}),
+      },
       orderBy: { dueDate: 'desc' },
-      take: query.periods ?? MAX_PERIODS,
+      // An explicit range says what is wanted; the count is the fallback for an unfiltered page.
+      take: from || to ? undefined : (query.periods ?? MAX_PERIODS),
       select: { id: true, label: true, dueDate: true },
     });
     if (periods.length === 0) {
-      return { indicators: [], periods: [], threshold: MIN_CONTRIBUTORS };
+      return { indicators: [], periods: [], threshold: MIN_CONTRIBUTORS, filters };
     }
 
     const values = await this.prisma.submissionValue.findMany({
@@ -141,6 +208,7 @@ export class PublicPortalService {
 
     return {
       threshold: MIN_CONTRIBUTORS,
+      filters,
       periods: ordered.map((p) => ({ id: p.id, label: p.label, dueDate: p.dueDate })),
       indicators: indicators.map((indicator) => ({
         id: indicator.id,
@@ -216,6 +284,22 @@ export class PublicPortalService {
         medianDays: days.length > 0 ? Math.round(this.median(days) * 10) / 10 : null,
       },
     };
+  }
+
+  /**
+   * The closed periods a reader may filter between.
+   *
+   * Its own endpoint because the filter has to be drawn before anything is filtered, and the
+   * indicators response only carries the periods that survived the current filter. A label and a
+   * due date are all it returns: neither is confidential, and neither says anything about who
+   * filed.
+   */
+  async periods(): Promise<PublicPeriod[]> {
+    return this.prisma.reportingPeriod.findMany({
+      where: { deletedAt: null, status: 'CLOSED' },
+      orderBy: { dueDate: 'desc' },
+      select: { id: true, label: true, dueDate: true },
+    });
   }
 
   /** Headline figures for the top of the public page. Counts of operators, never their figures. */

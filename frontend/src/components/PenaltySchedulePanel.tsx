@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gavel, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
@@ -199,6 +200,7 @@ export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
           >
             <Input
               id="pen-fixed"
+              placeholder="e.g. 50000"
               type="number"
               step="0.01"
               min="0"
@@ -213,6 +215,7 @@ export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
           >
             <Input
               id="pen-daily"
+              placeholder="e.g. 5000"
               type="number"
               step="0.01"
               min="0"
@@ -223,6 +226,7 @@ export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
           <Field label="Maximum (SSP)" htmlFor="pen-max" hint="Leave blank for no ceiling.">
             <Input
               id="pen-max"
+              placeholder="Leave blank for no cap"
               type="number"
               step="0.01"
               min="0"
@@ -251,19 +255,20 @@ export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
             />
           </Field>
           <Field
-            label="Label"
+            label={strings.field.label}
             htmlFor="pen-label"
             hint="Optional, e.g. the regulation it comes from."
           >
             <Input
               id="pen-label"
+              placeholder="e.g. Late quarterly return"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
             />
           </Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={create.isPending}

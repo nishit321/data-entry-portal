@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldAlert } from 'lucide-react';
 import {
@@ -251,9 +252,9 @@ export function EnforcementPage() {
       header={<PageHeader description={description} />}
       filters={
         <>
-          <FilterField label="Status" width="md">
+          <FilterField label={strings.field.status} width="md">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.status}
               options={STATUS_FILTER_OPTIONS}
               onChange={(status) => list.setFilters({ status })}
@@ -261,11 +262,11 @@ export function EnforcementPage() {
           </FilterField>
           {!isOperator && (
             <>
-              <FilterField label="Entity" width="lg">
+              <FilterField label={strings.field.entity} width="lg">
                 <Combobox
-                  aria-label="Filter by entity"
+                  aria-label={strings.filter.byEntity}
                   emptyLabel="All entities"
-                  placeholder="Search entities…"
+                  placeholder={strings.search.entities}
                   source={entityPicker}
                   value={list.filters.entityId}
                   onChange={(entityId) => list.setFilters({ entityId })}
@@ -275,7 +276,7 @@ export function EnforcementPage() {
                 <Combobox
                   aria-label="Filter by reporting period"
                   emptyLabel="All periods"
-                  placeholder="Search periods…"
+                  placeholder={strings.search.periods}
                   source={periodPicker}
                   value={list.filters.periodId}
                   onChange={(periodId) => list.setFilters({ periodId })}
@@ -352,7 +353,7 @@ export function EnforcementPage() {
               onClick={() => setPending(null)}
               disabled={actionMutation.isPending}
             >
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={actionMutation.isPending}

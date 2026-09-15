@@ -91,7 +91,7 @@ export function NotificationsPage() {
                 <button
                   type="button"
                   onClick={() => open(n)}
-                  className={`flex w-full gap-3 py-4 text-left focus:outline-none focus-visible:bg-gray-50 ${
+                  className={`flex w-full gap-3 py-4 text-start focus:outline-none focus-visible:bg-gray-50 ${
                     n.readAt ? '' : 'bg-brand-50/40'
                   } -mx-4 px-4 hover:bg-gray-50 sm:-mx-6 sm:px-6`}
                 >

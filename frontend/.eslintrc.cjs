@@ -59,5 +59,16 @@ module.exports = {
       'error',
       { tabbable: ['button', 'checkbox', 'link', 'searchbox', 'spinbutton', 'switch', 'textbox'] },
     ],
+
+    // A region that scrolls has to be reachable from the keyboard, or the rows past the fold are
+    // simply not there for anyone not using a mouse (WCAG 2.1.1; axe calls it
+    // `scrollable-region-focusable`). That means a tabindex on something the rule counts as
+    // non-interactive, so `group` joins `tabpanel` as a role where it is the correct answer
+    // rather than a mistake. Narrowed to that role, not switched off: a tabindex on a div with
+    // no role is still an error.
+    'jsx-a11y/no-noninteractive-tabindex': [
+      'error',
+      { tags: [], roles: ['tabpanel', 'group'], allowExpressionValues: true },
+    ],
   },
 };

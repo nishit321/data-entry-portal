@@ -1,4 +1,5 @@
 import { api } from './api';
+import { saveBlob } from './download';
 import type { AttachmentKind, SubmissionAttachment } from './types';
 
 export const attachmentsApi = {
@@ -23,14 +24,7 @@ export const attachmentsApi = {
       `/submissions/${submissionId}/attachments/${attachment.id}/download`,
       { responseType: 'blob' },
     );
-    const url = URL.createObjectURL(res.data);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = attachment.fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(res.data, attachment.fileName);
   },
 
   remove: (submissionId: string, attachmentId: string) =>

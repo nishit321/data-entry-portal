@@ -8,6 +8,8 @@
 //    non-ASCII name in the data arrives mangled.
 //  - CRLF line endings, which is what the CSV spec says and what Excel is happiest with.
 
+import { saveBlob } from './download';
+
 /** Hard ceiling on an export, so a filter that matches everything can't try to pull a million rows. */
 export const EXPORT_ROW_LIMIT = 5000;
 
@@ -34,17 +36,9 @@ export function toCsv<T>(rows: T[], columns: CsvColumn<T>[]): string {
   return BOM + [header, ...body].join('\r\n');
 }
 
-/** Hand the file to the browser. Revoking the object URL afterwards keeps the blob from leaking. */
+/** Hand the file to the browser. */
 export function downloadCsv(filename: string, contents: string): void {
-  const blob = new Blob([contents], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  saveBlob(new Blob([contents], { type: 'text/csv;charset=utf-8;' }), filename);
 }
 
 /** `audit-log-2026-08-16.csv` — the subject and the day it was taken, so files stay tellable apart. */

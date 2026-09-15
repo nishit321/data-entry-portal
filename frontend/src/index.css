@@ -80,3 +80,123 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Printing (UX_AUDIT §6.3).
+ *
+ * A regulator prints two things: a filed return, and a filtered view of the audit trail. Both end
+ * up in a case file or attached to a letter, and until now both came out with the navigation down
+ * the left, a search box, and a row of buttons nobody can press on paper.
+ *
+ * The rule this is built on: **a printed page has to say what it is.** On screen the answer is the
+ * URL and the surrounding chrome; on paper there is nothing but the sheet. So the chrome goes and
+ * a header takes its place, carrying the page's own title and the moment it was taken — see
+ * `usePrintHeader`. A page of figures with no operator, no period and no date is not evidence of
+ * anything.
+ */
+@media print {
+  /*
+   * Ink, not screen. Backgrounds are dropped by the browser anyway, which is what makes a status
+   * badge vanish — so tone is carried by a border instead, further down.
+   */
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff;
+    color: #000;
+  }
+
+  @page {
+    margin: 16mm 14mm;
+  }
+
+  /* Everything that only makes sense with a pointer. */
+  [data-print='hide'],
+  aside,
+  header,
+  nav,
+  button,
+  [role='toolbar'],
+  [role='tablist'],
+  [role='alert'],
+  .no-print {
+    display: none !important;
+  }
+
+  /*
+   * The content fills the sheet: no inner scrollers, no viewport heights, nothing clipped.
+   *
+   * Everything, not just inside `main`. The app shell is `h-screen overflow-hidden` with the
+   * scrolling happening inside it, which is right for a screen and means a printout of exactly
+   * one page: the clip is on an ancestor of the content, so a rule scoped to `main` never reaches
+   * it. Found by asking the browser where the scrolling containers actually were, rather than
+   * assuming.
+   */
+  body,
+  body * {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  [class*='h-screen'],
+  [class*='min-h-screen'],
+  [class*='h-full'] {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  main {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  [class*='sticky'],
+  [class*='fixed'] {
+    position: static !important;
+  }
+
+  /*
+   * A table split across a page break loses its headings, and a reader is then looking at a column
+   * of numbers with nothing to say what they are. `table-header-group` repeats them on every sheet.
+   */
+  thead {
+    display: table-header-group;
+  }
+
+  tr,
+  img,
+  figure {
+    break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  /*
+   * Status still has to read in black and white. The tone comes through as a background on screen
+   * and prints as nothing, so a border carries it — the shape survives a photocopier, which is
+   * where a regulatory file usually ends up.
+   */
+  [data-tone] {
+    border: 1px solid #000 !important;
+    background: transparent !important;
+    color: #000 !important;
+  }
+
+  /* Placed by `usePrintHeader`, and only ever visible here. */
+  .print-header {
+    display: block !important;
+    margin-bottom: 8mm;
+    border-bottom: 1px solid #000;
+    padding-bottom: 3mm;
+  }
+}
+
+/* The print header is for paper alone; on screen it would be a duplicate title. */
+.print-header {
+  display: none;
+}
