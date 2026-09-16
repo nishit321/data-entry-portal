@@ -348,8 +348,13 @@ describe('Public portal (e2e)', () => {
       expect(point.contributors).toBe(1);
       expect(point.withheld).toBe(true);
       expect(point.value).toBeNull();
-      // The one operator's actual figure must not be recoverable from the response.
-      expect(JSON.stringify(pub.body)).not.toContain('999');
+      // The one operator's actual figure must not be recoverable from the response. Identifiers
+      // are dropped before the check: they are random hex, so a UUID contains "999" often enough
+      // that the unstripped version failed CI for a reason that had nothing to do with disclosure.
+      const withoutIds = JSON.stringify(pub.body, (key, value) =>
+        key === 'id' || key === 'periodId' ? undefined : value,
+      );
+      expect(withoutIds).not.toContain('999');
     });
 
     it('averages rather than totals when the schedule says so', async () => {
