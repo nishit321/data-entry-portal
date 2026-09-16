@@ -16,5 +16,11 @@ process.env.DATABASE_URL = url.includes('connection_limit=')
   ? url
   : `${url}${url.includes('?') ? '&' : '?'}connection_limit=${TEST_POOL_SIZE}`;
 process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'e2e-test-secret-string-1234567890';
+// Without a key the authenticator-app routes answer 503 by design — unavailable rather than
+// insecure. Any suite that walks those routes, not just the TOTP suite itself, needs one present,
+// so the default belongs here rather than in each suite that happens to touch them.
+process.env.TOTP_ENCRYPTION_KEY =
+  process.env.TOTP_ENCRYPTION_KEY ??
+  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 // Force the email console-fallback so tests never hit SendGrid.
 process.env.SENDGRID_API_KEY = '';
