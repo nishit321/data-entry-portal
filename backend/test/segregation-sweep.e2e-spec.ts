@@ -52,8 +52,12 @@ interface World {
   documentId: string;
   apiClientId: string;
   siteId: string;
+  /** A second site, so a fibre route has two of this operator's own nodes to join. */
+  otherSiteId: string;
+  linkId: string;
   notificationId: string;
   certificateId: string;
+  caseId: string;
 }
 
 /** What a probe does with one route, and what the two calls should say. */
@@ -135,6 +139,9 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
     if (ids.length) {
       await prisma.submission.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.documentRecord.deleteMany({ where: { entityId: { in: ids } } });
+      // Routes before nodes: the cascade would take them anyway, but an explicit order says what
+      // depends on what to whoever reads this next.
+      await prisma.fibreLink.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.networkSite.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.apiClient.deleteMany({ where: { entityId: { in: ids } } });
       await prisma.agent.deleteMany({ where: { entityId: { in: ids } } });
@@ -293,6 +300,49 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
       },
     });
 
+    /*
+     * An enforcement case of this operator's own.
+     *
+     * Planted rather than swept into existence: how a case comes to exist is the engine's business
+     * and has its own spec. What this suite needs is a case id belonging to one operator and not
+     * the other, so that reading its orders can be tried from the wrong side.
+     */
+    const enforcementCase = await prisma.enforcementCase.create({
+      data: {
+        entityId: entity.id,
+        periodId: submission.periodId,
+        note: `Segregation fixture for ${tag}.`,
+        defaultStartedAt: new Date(Date.now() - 86400000),
+      },
+    });
+
+    /*
+     * A fibre route, and the second node it needs.
+     *
+     * Planted rather than posted, for the same reason the enforcement case is: what this suite
+     * needs is a route belonging to one operator and not the other, so that reading and editing it
+     * can be tried from the wrong side.
+     */
+    const otherSite = await prisma.networkSite.create({
+      data: {
+        entityId: entity.id,
+        siteReference: `SEG-NODE-${tag}`,
+        name: `Segregation node ${tag}`,
+        kind: 'FIBRE_NODE',
+        latitude: 4.9,
+        longitude: 31.6,
+      },
+    });
+    const link = await prisma.fibreLink.create({
+      data: {
+        entityId: entity.id,
+        linkReference: `SEG-LINK-${tag}`,
+        name: `Segregation route ${tag}`,
+        fromSiteId: site.id,
+        toSiteId: otherSite.id,
+      },
+    });
+
     return {
       entityId: entity.id,
       userId: user.id,
@@ -303,8 +353,11 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
       documentId: document.id,
       apiClientId: created.body.id,
       siteId: site.id,
+      otherSiteId: otherSite.id,
+      linkId: link.id,
       notificationId: notification.id,
       certificateId: certificate.id,
+      caseId: enforcementCase.id,
     };
   }
 
@@ -398,6 +451,20 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
     ).id,
   });
 
+  const freshLink = async (a: World): Promise<Partial<World>> => ({
+    linkId: (
+      await prisma.fibreLink.create({
+        data: {
+          entityId: a.entityId,
+          linkReference: `LINK-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: 'Throwaway route',
+          fromSiteId: a.siteId,
+          toSiteId: a.otherSiteId,
+        },
+      })
+    ).id,
+  });
+
   const freshDocument = async (a: World): Promise<Partial<World>> => ({
     documentId: (
       await prisma.documentRecord.create({
@@ -474,6 +541,16 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
 
   /** Every probe, keyed by the route signature the inventory reports. */
   const PROBES: Record<string, Probe> = {
+    /*
+     * The orders on a case: a suspension or a cancellation of somebody's licence.
+     *
+     * Worth having in this sweep more than most. The route reads by case id, and a case id is a
+     * UUID rather than a secret — so without scoping, one operator could read the Authority's
+     * order against another by holding the id. The census found exactly that when the route was
+     * added, which is what it is for.
+     */
+    'GET /api/v1/enforcement/:id/orders': { url: (w) => `/api/v1/enforcement/${w.caseId}/orders` },
+
     'GET /api/v1/agents/:id': { url: (w) => `/api/v1/agents/${w.agentId}` },
     'PATCH /api/v1/agents/:id': {
       url: (w) => `/api/v1/agents/${w.agentId}`,
@@ -618,6 +695,24 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
     'DELETE /api/v1/geo/sites/:id': {
       url: (w) => `/api/v1/geo/sites/${w.siteId}`,
       disposable: freshSite,
+      allow: [200, 204],
+    },
+
+    'GET /api/v1/geo/sites/:id': { url: (w) => `/api/v1/geo/sites/${w.siteId}` },
+
+    /*
+     * A fibre route names two sites by id, which is a second way to reach a row on the register.
+     * An operator that could edit another operator's route would learn where that operator's nodes
+     * are, which is the thing this whole sweep exists to stop.
+     */
+    'PATCH /api/v1/geo/links/:id': {
+      url: (w) => `/api/v1/geo/links/${w.linkId}`,
+      body: { name: 'Renamed' },
+      disposable: freshLink,
+    },
+    'DELETE /api/v1/geo/links/:id': {
+      url: (w) => `/api/v1/geo/links/${w.linkId}`,
+      disposable: freshLink,
       allow: [200, 204],
     },
 

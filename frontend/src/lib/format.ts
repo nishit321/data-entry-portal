@@ -169,6 +169,22 @@ export function formatSsp(amount?: number | null): string {
   }).format(amount)}`;
 }
 
+/**
+ * The same kind of amount in USD, converted from SSP at the reporting period's own rate.
+ *
+ * Every figure in the portal is SSP; the USD reading sits beside it because NCA asked for both
+ * (3 September 2026). The dash is doing real work here: it means "no exchange rate is set for that
+ * period", which is a different statement from "nothing was earned", and printing 0.00 would say
+ * the second.
+ */
+export function formatUsd(amount?: number | null): string {
+  if (amount === null || amount === undefined || Number.isNaN(amount)) return '—';
+  return `USD ${new Intl.NumberFormat(LOCALE, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)}`;
+}
+
 /** A human file size, e.g. 24 KB or 1.4 MB. */
 export function formatFileSize(bytes?: number | null): string {
   if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return '—';

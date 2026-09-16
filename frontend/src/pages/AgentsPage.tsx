@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -284,20 +285,20 @@ export function AgentsPage() {
       filters={
         <>
           {isAuthorityViewer && (
-            <FilterField label="Entity" width="lg">
+            <FilterField label={strings.field.entity} width="lg">
               <Combobox
-                aria-label="Filter by entity"
+                aria-label={strings.filter.byEntity}
                 emptyLabel="All entities"
-                placeholder="Search entities…"
+                placeholder={strings.search.entities}
                 source={entityPicker}
                 value={list.filters.entityId}
                 onChange={(entityId) => list.setFilters({ entityId })}
               />
             </FilterField>
           )}
-          <FilterField label="Status" width="sm">
+          <FilterField label={strings.field.status} width="sm">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.isActive}
               options={STATUS_FILTER_OPTIONS}
               onChange={(isActive) => list.setFilters({ isActive })}
@@ -341,7 +342,7 @@ export function AgentsPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : canWrite ? (
             <Button variant="secondary" onClick={openCreate}>
@@ -376,7 +377,7 @@ export function AgentsPage() {
             />
             <div className="flex justify-end">
               <Button variant="secondary" onClick={() => setViewing(null)}>
-                Close
+                {strings.action.close}
               </Button>
             </div>
           </div>
@@ -392,7 +393,7 @@ export function AgentsPage() {
           {error && <Alert tone="danger">{error}</Alert>}
           {isAuthorityViewer &&
             (editing ? (
-              <FormField htmlFor="agent-entity-view" label="Entity">
+              <FormField htmlFor="agent-entity-view" label={strings.field.entity}>
                 {() => (
                   <Input
                     id="agent-entity-view"
@@ -405,7 +406,7 @@ export function AgentsPage() {
             ) : (
               <FormField
                 htmlFor="agent-entity"
-                label="Entity"
+                label={strings.field.entity}
                 error={form.formState.errors.entityId?.message}
                 required
               >
@@ -420,9 +421,9 @@ export function AgentsPage() {
                         onChange={onChange}
                         source={entityPicker}
                         emptyLabel="Select the operator this agent belongs to"
-                        placeholder="Search entities…"
+                        placeholder={strings.search.entities}
                         invalid={!!form.formState.errors.entityId}
-                        aria-label="Entity"
+                        aria-label={strings.field.entity}
                       />
                     )}
                   />
@@ -446,7 +447,7 @@ export function AgentsPage() {
             </FormField>
             <FormField
               htmlFor="agent-name"
-              label="Name"
+              label={strings.field.name}
               error={form.formState.errors.name?.message}
               required
             >
@@ -498,7 +499,7 @@ export function AgentsPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button type="submit" isLoading={saveMutation.isPending}>
               {editing ? 'Save changes' : 'Register agent'}

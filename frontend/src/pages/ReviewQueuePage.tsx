@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardCheck } from 'lucide-react';
@@ -209,27 +210,27 @@ export function ReviewQueuePage() {
       }}
       filters={
         <>
-          <FilterField label="Entity" width="lg">
+          <FilterField label={strings.field.entity} width="lg">
             <Combobox
-              aria-label="Filter by entity"
+              aria-label={strings.filter.byEntity}
               emptyLabel="All entities"
-              placeholder="Search entities…"
+              placeholder={strings.search.entities}
               source={entityPicker}
               value={list.filters.entityId}
               onChange={(entityId) => list.setFilters({ entityId })}
             />
           </FilterField>
-          <FilterField label="Reporting period" width="lg">
+          <FilterField label={strings.field.reportingPeriod} width="lg">
             <Combobox
               aria-label="Filter by reporting period"
               emptyLabel="All periods"
-              placeholder="Search periods…"
+              placeholder={strings.search.periods}
               source={periodPicker}
               value={list.filters.periodId}
               onChange={(periodId) => list.setFilters({ periodId })}
             />
           </FilterField>
-          <FilterField label="Template" width="lg">
+          <FilterField label={strings.field.template} width="lg">
             <Combobox
               aria-label="Filter by template"
               emptyLabel="All templates"

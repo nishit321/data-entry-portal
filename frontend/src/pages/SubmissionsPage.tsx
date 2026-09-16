@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -332,27 +333,27 @@ export function SubmissionsPage() {
         <>
           {isAuthority && (
             <>
-              <FilterField label="Entity" width="lg">
+              <FilterField label={strings.field.entity} width="lg">
                 <Combobox
-                  aria-label="Filter by entity"
+                  aria-label={strings.filter.byEntity}
                   emptyLabel="All entities"
-                  placeholder="Search entities…"
+                  placeholder={strings.search.entities}
                   source={entityPicker}
                   value={list.filters.entityId}
                   onChange={(entityId) => list.setFilters({ entityId })}
                 />
               </FilterField>
-              <FilterField label="Reporting period" width="lg">
+              <FilterField label={strings.field.reportingPeriod} width="lg">
                 <Combobox
                   aria-label="Filter by reporting period"
                   emptyLabel="All periods"
-                  placeholder="Search periods…"
+                  placeholder={strings.search.periods}
                   source={periodPicker}
                   value={list.filters.periodId}
                   onChange={(periodId) => list.setFilters({ periodId })}
                 />
               </FilterField>
-              <FilterField label="Template" width="lg">
+              <FilterField label={strings.field.template} width="lg">
                 <Combobox
                   aria-label="Filter by template"
                   emptyLabel="All templates"
@@ -364,9 +365,9 @@ export function SubmissionsPage() {
               </FilterField>
             </>
           )}
-          <FilterField label="Status" width="sm">
+          <FilterField label={strings.field.status} width="sm">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.status}
               options={STATUS_FILTER_OPTIONS}
               onChange={(status) => list.setFilters({ status })}
@@ -428,7 +429,7 @@ export function SubmissionsPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : userIsOperator ? (
             <Button variant="secondary" onClick={openStart}>
@@ -445,7 +446,7 @@ export function SubmissionsPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setStartOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               type="button"
@@ -474,7 +475,7 @@ export function SubmissionsPage() {
               </p>
               <Select
                 id="start-period"
-                aria-label="Reporting period"
+                aria-label={strings.field.reportingPeriod}
                 value={selectedPeriodId}
                 options={periodOptions}
                 placeholder="Select a reporting period"

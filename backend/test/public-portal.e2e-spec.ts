@@ -1,5 +1,7 @@
+import { inflateSync } from 'zlib';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import ExcelJS from 'exceljs';
 import request from 'supertest';
 import {
   EntityStatus,
@@ -381,6 +383,265 @@ describe('Public portal (e2e)', () => {
 
       const pub = await request(server).get('/api/v1/public/indicators').expect(200);
       expect(ourIndicators(pub.body, 'People connected')).toBeUndefined();
+    });
+  });
+
+  describe('filtering, search and download (NCA, 15 September 2026)', () => {
+    /*
+     * "Public Portal: Implement filtering and search capabilities; enable export to PDF, Excel,
+     *  and other formats."
+     *
+     * Two of these tests are about the feature working. The rest are about the thing that could go
+     * wrong with it, which is not a filter returning the wrong rows: it is a download returning
+     * what the page refused to show. The threshold is the portal's only real protection for an
+     * operator's figures, and an export that queried for itself would sit outside it.
+     *
+     * Publishes its own two figures rather than leaning on the block above: one that four
+     * operators reported and one that only a single operator did. Both have to be in the same
+     * file for any of this to mean anything, since what is being measured is that a download
+     * treats them differently.
+     */
+    const PERIOD_DUE = '2025-07-15';
+    const PUBLISHED = 'Download sector total';
+    const WITHHELD = 'Download thin figure';
+
+    beforeAll(async () => {
+      await addIndicator({
+        fieldKey: openKey,
+        aggregation: PublicAggregation.COUNT,
+        label: PUBLISHED,
+        unit: 'operators',
+        description: 'How many operators reported subscriber numbers.',
+        isPublished: true,
+      });
+      // Reported by one operator, whose figure is 999. It must be withheld everywhere.
+      await addIndicator({
+        fieldKey: thinKey,
+        aggregation: PublicAggregation.AVERAGE,
+        label: WITHHELD,
+        isPublished: true,
+      });
+    });
+
+    const fetch = (path: string, query: Record<string, string | number> = {}) =>
+      request(server).get(path).query(query);
+
+    const download = async (path: string, query: Record<string, string> = {}) => {
+      const res = await fetch(path, query).responseType('blob').expect(200);
+      return { body: res.body as Buffer, headers: res.headers };
+    };
+
+    /** Every row of a sheet, as strings. Rows rather than a flat list, so a cell can be named. */
+    async function readSheet(buffer: Buffer, sheetName: string): Promise<string[][]> {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buffer as unknown as ArrayBuffer);
+      const sheet = wb.getWorksheet(sheetName);
+      const rows: string[][] = [];
+      sheet?.eachRow((row) => {
+        const cells: string[] = [];
+        // `eachCell` skips empty cells, and an empty cell is exactly what one of these tests is
+        // looking for, so the row is read by index instead.
+        for (let i = 1; i <= (sheet.columnCount || 0); i += 1) {
+          cells.push(String(row.getCell(i).value ?? ''));
+        }
+        rows.push(cells);
+      });
+      return rows;
+    }
+
+    /** The row a figure is on, found by its label in the first column. */
+    const rowFor = (rows: string[][], label: string) => rows.find((r) => r[0] === label);
+
+    /**
+     * The text inside a PDF.
+     *
+     * pdfkit compresses its content streams, so searching the raw bytes for a figure would find
+     * nothing whatever the document said — a test that passes because it cannot read the file is
+     * worse than no test, and this one exists specifically to prove a number is absent. So the
+     * FlateDecode streams are inflated and the text operators read back out of them.
+     */
+    function pdfText(buffer: Buffer): string {
+      let content = '';
+      let at = 0;
+      for (;;) {
+        const start = buffer.indexOf('stream', at);
+        if (start === -1) break;
+        const end = buffer.indexOf('endstream', start);
+        if (end === -1) break;
+        // Skip the newline that follows the `stream` keyword.
+        let from = start + 'stream'.length;
+        if (buffer[from] === 0x0d) from += 1;
+        if (buffer[from] === 0x0a) from += 1;
+        try {
+          content += inflateSync(buffer.subarray(from, end)).toString('latin1');
+        } catch {
+          // Not a deflate stream (an embedded font, say). Nothing to read here.
+        }
+        at = end + 1;
+      }
+
+      /*
+       * pdfkit writes each run as a hex string inside a kerning array: `[<48656c6c6f> 20 <21>] TJ`.
+       * Decoding every `<...>` group and joining them gives the words back, with the kerning
+       * numbers between runs dropped. Good enough to ask whether a figure appears in the document,
+       * which is the only question these tests put to it.
+       */
+      return (content.match(/<([0-9A-Fa-f]+)>/g) ?? [])
+        .map((run) => Buffer.from(run.slice(1, -1), 'hex').toString('latin1'))
+        .join('');
+    }
+
+    it('offers the closed periods a reader may filter between, and names nobody', async () => {
+      const res = await fetch('/api/v1/public/periods').expect(200);
+      const ours = (res.body as { label: string; dueDate: string }[]).find(
+        (p) => p.label === '2025 Q2 public',
+      );
+      expect(ours).toBeDefined();
+      expect(ours!.dueDate.slice(0, 10)).toBe(PERIOD_DUE);
+      // A period is a label and a date. Anything about who filed against it belongs elsewhere.
+      expect(JSON.stringify(res.body)).not.toContain('Pub Op');
+    });
+
+    it('searches what a figure is called', async () => {
+      const hit = await fetch('/api/v1/public/indicators', { search: 'sector total' }).expect(200);
+      expect(ourIndicators(hit.body, PUBLISHED)).toBeDefined();
+      expect(ourIndicators(hit.body, WITHHELD)).toBeUndefined();
+
+      const miss = await fetch('/api/v1/public/indicators', {
+        search: 'nothing is called this',
+      }).expect(200);
+      expect(miss.body.indicators).toHaveLength(0);
+    });
+
+    it('searches what a figure means, not only its name', async () => {
+      // The description carries the plain-language explanation, and it is what a reader who does
+      // not know the Authority's vocabulary will type words from.
+      const res = await fetch('/api/v1/public/indicators', { search: 'subscriber' }).expect(200);
+      expect(ourIndicators(res.body, PUBLISHED)).toBeDefined();
+    });
+
+    it('narrows to one figure when the reader picks one', async () => {
+      const all = await fetch('/api/v1/public/indicators').expect(200);
+      const one = (all.body.indicators as { id: string; label: string }[]).find(
+        (i) => i.label === PUBLISHED,
+      )!;
+
+      const res = await fetch('/api/v1/public/indicators', { indicatorId: one.id }).expect(200);
+      expect(res.body.indicators).toHaveLength(1);
+      expect(res.body.indicators[0].label).toBe(PUBLISHED);
+    });
+
+    it('covers only the periods inside the range asked for', async () => {
+      const inside = await fetch('/api/v1/public/indicators', {
+        from: '2025-01-01',
+        to: '2025-12-31',
+      }).expect(200);
+      expect(
+        (inside.body.periods as { label: string }[]).some((p) => p.label === '2025 Q2 public'),
+      ).toBe(true);
+
+      // The other direction, which is the half that proves the filter is applied at all: a range
+      // the period falls outside of must not carry it.
+      const outside = await fetch('/api/v1/public/indicators', {
+        from: '2030-01-01',
+        to: '2030-12-31',
+      }).expect(200);
+      expect(
+        (outside.body.periods as { label: string }[]).some((p) => p.label === '2025 Q2 public'),
+      ).toBe(false);
+    });
+
+    it('refuses a filter nobody declared', async () => {
+      // The one that would matter: narrowing the figures to a single operator would hand back that
+      // operator's return as a sector total, with the threshold none the wiser.
+      await fetch('/api/v1/public/indicators', { entityId: 'anything' }).expect(400);
+      await fetch('/api/v1/public/indicators', { from: 'not-a-date' }).expect(400);
+    });
+
+    it('downloads a workbook that says which figures were withheld', async () => {
+      /*
+       * The assertion is on the cell, not on the file.
+       *
+       * An earlier version of this test searched the whole sheet for the word "Withheld" and for
+       * the withheld operator's figure. Both passed no matter what the export did: the word is in
+       * the closing note anyway, and a withheld point arrives from the portal with its value
+       * already null, so the figure was never there to leak. Breaking the export on purpose left
+       * the test green, which is how it was caught.
+       *
+       * What can actually go wrong is quieter than a leak, and this is it: the period reads as
+       * blank, a reader takes blank for nought, and a figure the Authority withheld gets quoted as
+       * zero. So the cell has to say the word.
+       */
+      const { body, headers } = await download('/api/v1/public/indicators.xlsx');
+      expect(headers['content-disposition']).toContain('sector-figures');
+      // A real .xlsx is a zip.
+      expect(body.subarray(0, 2).toString('latin1')).toBe('PK');
+
+      const rows = await readSheet(body, 'Sector figures');
+      const header = rows.find((r) => r[0] === 'Figure')!;
+      const column = header.indexOf('2025 Q2 public');
+      expect(column).toBeGreaterThan(0);
+
+      // The figure four operators reported carries a number, so this is not reading a blank sheet.
+      const published = rowFor(rows, PUBLISHED)!;
+      expect(Number(published[column])).toBe(4);
+
+      // The one only a single operator reported says so, in a word, in the cell.
+      const withheld = rowFor(rows, WITHHELD)!;
+      expect(withheld[column]).toBe('Withheld');
+
+      // And the file explains itself, because a spreadsheet outlives the page it came from.
+      expect(rows.flat().join(' ')).toContain('Withheld is not zero');
+    });
+
+    it('says how many operators each figure rests on, without saying which', async () => {
+      const { body } = await download('/api/v1/public/indicators.xlsx');
+      const rows = await readSheet(body, 'Coverage');
+      const header = rows.find((r) => r[0] === 'Figure')!;
+      const column = header.indexOf('2025 Q2 public');
+
+      // The count is published on purpose, for the withheld figure too: it is how a reader tells a
+      // sector figure from a partial one, and it is what explains why a period says "Withheld".
+      expect(Number(rowFor(rows, WITHHELD)![column])).toBe(1);
+      expect(Number(rowFor(rows, PUBLISHED)![column])).toBe(4);
+      // A count is not a list. No operator is named anywhere in the file.
+      expect(rows.flat().join(' ')).not.toContain('Pub Op');
+    });
+
+    it('downloads a PDF that withholds the same figure', async () => {
+      const { body, headers } = await download('/api/v1/public/indicators.pdf');
+      expect(body.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      expect(headers['content-type']).toContain('application/pdf');
+
+      const text = pdfText(body);
+      // The extractor has to work, or every assertion under it is vacuous.
+      expect(text).toContain(PUBLISHED);
+
+      /*
+       * The word has to be on the withheld figure's own row, not merely somewhere in the document
+       * — the closing note mentions it too, so a document-wide search proves nothing.
+       *
+       * pdfkit writes a row's cells in order with nothing between them, so the label runs straight
+       * into its first cell in the extracted text. There is one period in this fixture, so the
+       * label followed immediately by the word is the row reading "Withheld".
+       */
+      expect(text).toContain(`${WITHHELD}Withheld`);
+    });
+
+    it('carries the filters into the file, so a download says what it is a view of', async () => {
+      const { body } = await download('/api/v1/public/indicators.xlsx', {
+        search: 'sector total',
+        from: '2025-01-01',
+      });
+      const rows = await readSheet(body, 'Sector figures');
+      const joined = rows.flat().join(' ');
+
+      // Filtered the same way the screen was, and says so. A spreadsheet that looks like the whole
+      // sector but holds one filtered view of it is how a partial figure gets quoted as a total.
+      expect(joined).toContain('sector total');
+      expect(joined).toContain('2025-01-01');
+      expect(rowFor(rows, PUBLISHED)).toBeDefined();
+      expect(rowFor(rows, WITHHELD)).toBeUndefined();
     });
   });
 });

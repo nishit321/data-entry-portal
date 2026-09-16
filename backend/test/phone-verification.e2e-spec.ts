@@ -194,6 +194,70 @@ describe('phone verification (e2e)', () => {
     });
   });
 
+  describe('the sign-in code', () => {
+    it('goes by text as well as email, once a number is confirmed', async () => {
+      // Q8 asks for SMS OTP delivery, and in the same breath says never to rely on SMS alone. So
+      // both channels carry the same code: a text that does not arrive must not be the only thing
+      // between an operator and a deadline.
+      await start('+211920002000');
+      await confirm(sms.lastCode());
+      sms.sent.length = 0;
+
+      const login = await request(server)
+        .post('/api/v1/auth/login')
+        .send({ email: EMAIL, password: PASSWORD });
+      expect(login.body.mfaRequired).toBe(true);
+
+      expect(sms.sent).toHaveLength(1);
+      expect(sms.sent[0]!.to).toBe('+211920002000');
+      expect(sms.sent[0]!.message).toMatch(/is your NCA Portal sign-in code/);
+    });
+
+    it('still signs in when the text cannot be sent', async () => {
+      // The email has already gone. Refusing the sign-in because a gateway had a bad moment would
+      // turn a second convenience into a second way of being locked out.
+      await start('+211920002100');
+      await confirm(sms.lastCode());
+      sms.failWith = 'Insufficient balance.';
+
+      const login = await request(server)
+        .post('/api/v1/auth/login')
+        .send({ email: EMAIL, password: PASSWORD });
+
+      expect(login.status).toBe(200);
+      expect(login.body.mfaRequired).toBe(true);
+      const verified = await request(server)
+        .post('/api/v1/auth/verify-otp')
+        .send({ challengeId: login.body.challengeId, code: OTP });
+      expect(verified.status).toBe(200);
+    });
+
+    it('sends no text to a number that was never confirmed', async () => {
+      /*
+       * The state is planted directly, because the API cannot produce it: a number is written to
+       * the user only by the confirmation step, together with its timestamp.
+       *
+       * Writing the test the obvious way — start a verification, then sign in — passes whether the
+       * guard is there or not, because the pending number never reaches the user record at all. It
+       * was checked, and it passed with the guard deleted, which makes it decoration. This version
+       * fails when the guard goes.
+       *
+       * The guard is worth keeping for the state a migration or a hand-edited row could create.
+       * An unconfirmed number belongs to whoever actually holds it, and texting a sign-in code
+       * there hands the second factor to a stranger.
+       */
+      await prisma.user.update({
+        where: { id: userId },
+        data: { phone: '+211920002200', phoneVerifiedAt: null },
+      });
+      sms.sent.length = 0;
+
+      await request(server).post('/api/v1/auth/login').send({ email: EMAIL, password: PASSWORD });
+
+      expect(sms.sent).toHaveLength(0);
+    });
+  });
+
   describe('when it should refuse', () => {
     it('rejects a wrong code without confirming anything', async () => {
       await start('+211920000555');

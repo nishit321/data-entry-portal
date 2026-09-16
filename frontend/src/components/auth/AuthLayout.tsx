@@ -40,8 +40,8 @@ export function AuthLayout({
       {/* Brand panel */}
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-gradient-to-br from-brand-800 to-brand-900 p-12 text-white lg:flex">
         {/* Decorative glows */}
-        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-brand-600/30 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-24 -left-16 h-72 w-72 rounded-full bg-brand-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -end-24 -top-24 h-72 w-72 rounded-full bg-brand-600/30 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -start-16 h-72 w-72 rounded-full bg-brand-500/20 blur-3xl" />
 
         <div className="relative flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20">

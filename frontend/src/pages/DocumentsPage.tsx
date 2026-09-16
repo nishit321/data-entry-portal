@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BellRing, Download, FileText, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
@@ -320,7 +321,7 @@ export function DocumentsPage() {
       }}
       filters={
         <>
-          <FilterField label="Type" width="md">
+          <FilterField label={strings.field.type} width="md">
             <Select
               aria-label="Filter by document type"
               value={list.filters.kind}
@@ -329,11 +330,11 @@ export function DocumentsPage() {
             />
           </FilterField>
           {!isOperator && (
-            <FilterField label="Operator" width="lg">
+            <FilterField label={strings.field.operator} width="lg">
               <Combobox
-                aria-label="Filter by operator"
+                aria-label={strings.filter.byOperator}
                 emptyLabel="All operators"
-                placeholder="Search operators…"
+                placeholder={strings.search.operators}
                 source={entityPicker}
                 value={list.filters.entityId}
                 onChange={(id) => list.setFilters({ entityId: id })}
@@ -404,7 +405,7 @@ export function DocumentsPage() {
             </p>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Type" htmlFor="doc-kind">
+            <Field label={strings.field.type} htmlFor="doc-kind">
               <Select
                 id="doc-kind"
                 value={form.kind}
@@ -415,6 +416,7 @@ export function DocumentsPage() {
             <Field label="Reference" htmlFor="doc-ref" hint="The licence or certificate number.">
               <Input
                 id="doc-ref"
+                placeholder="e.g. NCA/LIC/2026/001"
                 value={form.reference}
                 onChange={(e) => setForm({ ...form, reference: e.target.value })}
               />
@@ -423,16 +425,17 @@ export function DocumentsPage() {
           <Field label="Title" htmlFor="doc-title">
             <Input
               id="doc-title"
+              placeholder="e.g. Unified licence"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
             />
           </Field>
           {!isOperator && !replacing && (
-            <Field label="Operator" htmlFor="doc-entity">
+            <Field label={strings.field.operator} htmlFor="doc-entity">
               <Combobox
                 aria-label="Choose the operator"
                 emptyLabel="Choose an operator"
-                placeholder="Search operators…"
+                placeholder={strings.search.operators}
                 source={entityPicker}
                 value={entityId}
                 onChange={setEntityId}
@@ -468,12 +471,12 @@ export function DocumentsPage() {
               type="file"
               accept={DOCUMENT_ACCEPT}
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
+              className="block w-full text-sm text-gray-600 file:me-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
             />
           </Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setUploadOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               icon={FileText}

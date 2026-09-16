@@ -5,8 +5,11 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
   pull_request:
+  # Deploy calls this same suite rather than repeating it, so what gates a
+  # release is exactly what gates a pull request.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}

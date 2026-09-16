@@ -1,13 +1,36 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { strings } from '../lib/strings';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Building2, CalendarCheck, Info, MessageSquare } from 'lucide-react';
-import { Badge, Card, EmptyState, Skeleton } from '../components/ui';
+import {
+  ArrowLeft,
+  Building2,
+  CalendarCheck,
+  FileSpreadsheet,
+  FileText,
+  Info,
+  MessageSquare,
+} from 'lucide-react';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  SearchInput,
+  Select,
+  Skeleton,
+  useToast,
+  type SelectOption,
+} from '../components/ui';
 import { PublicIndicatorChart } from '../components/PublicIndicatorChart';
 import { publicPortalApi, publicPortalKeys } from '../lib/public-portal.api';
+import { getErrorMessage } from '../lib/api';
 import {
   COMPLAINT_CATEGORY_LABELS,
   ENTITY_TYPE_LABELS,
   PUBLIC_AGGREGATION_LABELS,
+  type PublicPortalFilters,
 } from '../lib/types';
 
 function StatTile({
@@ -39,13 +62,32 @@ function StatTile({
  * are and are not looking at.
  */
 export function OpenDataPage() {
+  const toast = useToast();
+  const [search, setSearch] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [downloading, setDownloading] = useState<'xlsx' | 'pdf' | null>(null);
+
+  const filters: PublicPortalFilters = useMemo(
+    () => ({ search: search || undefined, from: from || undefined, to: to || undefined }),
+    [search, from, to],
+  );
+  const filtered = Boolean(search || from || to);
+
   const overviewQuery = useQuery({
     queryKey: publicPortalKeys.overview,
     queryFn: () => publicPortalApi.overview(),
   });
   const indicatorsQuery = useQuery({
-    queryKey: publicPortalKeys.indicators(8),
-    queryFn: () => publicPortalApi.indicators(8),
+    queryKey: publicPortalKeys.indicators(8, filters),
+    queryFn: () => publicPortalApi.indicators(8, filters),
+    // Keep the figures on screen while a narrower set is fetched, so the page does not blink back
+    // to skeletons on every keystroke.
+    placeholderData: (previous) => previous,
+  });
+  const periodsQuery = useQuery({
+    queryKey: publicPortalKeys.periods,
+    queryFn: () => publicPortalApi.periods(),
   });
   const complaintsQuery = useQuery({
     queryKey: publicPortalKeys.complaints,
@@ -56,6 +98,34 @@ export function OpenDataPage() {
   const report = indicatorsQuery.data;
   const complaints = complaintsQuery.data;
 
+  /*
+   * The range is chosen by period, not by calendar date.
+   *
+   * A reader thinks in "the 2025 quarters", not in due dates, and only closed periods are ever
+   * published — so a free date picker would offer ranges with nothing in them. The value behind
+   * each option is still a date, because that is what the server filters on.
+   */
+  const periodOptions = periodsQuery.data ?? [];
+  const fromOptions: SelectOption[] = [
+    { value: '', label: 'The earliest published' },
+    ...periodOptions.map((p) => ({ value: p.dueDate, label: p.label })),
+  ];
+  const toOptions: SelectOption[] = [
+    { value: '', label: 'The latest published' },
+    ...periodOptions.map((p) => ({ value: p.dueDate, label: p.label })),
+  ];
+
+  async function download(format: 'xlsx' | 'pdf') {
+    setDownloading(format);
+    try {
+      await publicPortalApi.download(format, filters);
+    } catch (err) {
+      toast.error(getErrorMessage(err, "We couldn't prepare that download. Please try again."));
+    } finally {
+      setDownloading(null);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="border-b border-gray-100 bg-white">
@@ -65,7 +135,7 @@ export function OpenDataPage() {
             className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700"
           >
             <ArrowLeft size={14} aria-hidden />
-            Back to sign in
+            {strings.action.backToSignIn}
           </Link>
           <h1 className="mt-4 text-3xl font-semibold text-gray-900">
             South Sudan communications sector
@@ -117,12 +187,83 @@ export function OpenDataPage() {
         )}
 
         <section className="space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900">Sector figures</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold text-gray-900">Sector figures</h2>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={FileSpreadsheet}
+                isLoading={downloading === 'xlsx'}
+                disabled={!report || report.indicators.length === 0}
+                onClick={() => void download('xlsx')}
+              >
+                Excel
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={FileText}
+                isLoading={downloading === 'pdf'}
+                disabled={!report || report.indicators.length === 0}
+                onClick={() => void download('pdf')}
+              >
+                PDF
+              </Button>
+            </div>
+          </div>
+
+          <Card>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_12rem_12rem]">
+              <Field label="Find a figure" htmlFor="open-search">
+                <SearchInput
+                  id="open-search"
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="For example subscribers, or fibre"
+                  aria-label="Find a figure"
+                />
+              </Field>
+              <Field label="From" htmlFor="open-from">
+                <Select id="open-from" value={from} options={fromOptions} onChange={setFrom} />
+              </Field>
+              <Field label="To" htmlFor="open-to">
+                <Select id="open-to" value={to} options={toOptions} onChange={setTo} />
+              </Field>
+            </div>
+            {filtered && (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-500">
+                  {/* Said plainly, because a download of a narrowed view is easy to mistake for
+                      the whole sector once it is sitting in a folder. */}
+                  Downloads cover what is shown here.
+                </p>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-brand-700 hover:text-brand-800"
+                  onClick={() => {
+                    setSearch('');
+                    setFrom('');
+                    setTo('');
+                  }}
+                >
+                  {strings.action.clearFilters}
+                </button>
+              </div>
+            )}
+          </Card>
+
           {indicatorsQuery.isLoading ? (
             <Skeleton className="h-56 w-full" />
           ) : !report || report.indicators.length === 0 ? (
             <Card>
-              <EmptyState message="No sector figures have been published yet. They appear here once the Authority publishes them." />
+              <EmptyState
+                message={
+                  filtered
+                    ? 'Nothing published matches what you are looking for. Try a different word, or widen the period.'
+                    : 'No sector figures have been published yet. They appear here once the Authority publishes them.'
+                }
+              />
             </Card>
           ) : (
             report.indicators.map((indicator) => (

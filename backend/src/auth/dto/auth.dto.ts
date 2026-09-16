@@ -49,9 +49,17 @@ export class VerifyOtpDto {
   @IsUUID()
   challengeId: string;
 
+  /**
+   * The emailed code, the authenticator app's six digits, or a recovery code.
+   *
+   * The upper bound has to clear a recovery code (`ABCDE-FGHIJ`), which is longer than any code
+   * the server itself issues. Left too tight, a recovery code is refused by validation before the
+   * login flow ever sees it, and the only way back into an account with a lost phone is closed by
+   * a number in a decorator.
+   */
   @IsString()
   @MinLength(4)
-  @MaxLength(10)
+  @MaxLength(20)
   code: string;
 }
 

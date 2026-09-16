@@ -11,7 +11,7 @@ export interface FormFieldControlProps extends FieldControlProps {
  * `aria-invalid` / `aria-describedby` so the control lights up red without hand-wiring.
  * Pass the control as a render function to receive the props to spread:
  *
- *   <FormField htmlFor="email" label="Email" error={errors.email?.message}>
+ *   <FormField htmlFor="email" label={strings.field.email} error={errors.email?.message}>
  *     {(field) => <Input type="email" {...field} {...register('email')} />}
  *   </FormField>
  *

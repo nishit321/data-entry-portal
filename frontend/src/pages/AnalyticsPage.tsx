@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -94,11 +95,11 @@ export function AnalyticsPage() {
 
         {canFilter && (
           <div className="flex flex-wrap gap-4">
-            <FilterField label="Operator" width="lg">
+            <FilterField label={strings.field.operator} width="lg">
               <Combobox
-                aria-label="Filter by operator"
+                aria-label={strings.filter.byOperator}
                 emptyLabel="All operators"
-                placeholder="Search operators…"
+                placeholder={strings.search.operators}
                 source={entityPicker}
                 value={entityId}
                 onChange={setEntityId}

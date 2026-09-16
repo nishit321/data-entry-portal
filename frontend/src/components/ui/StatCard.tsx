@@ -16,11 +16,21 @@ const tones: Record<StatTone, string> = {
 export function StatCard({
   label,
   value,
+  hint,
   icon: Icon,
   tone = 'brand',
 }: {
   label: string;
   value: ReactNode;
+  /**
+   * A quieter second reading of the same figure, under the value.
+   *
+   * For the thing that qualifies a number rather than competing with it: the same amount in
+   * another currency, a comparison with last quarter, what a percentage is a percentage of. It is
+   * a prop rather than something a screen composes for itself, because a secondary line styled at
+   * the call site is how eight tiles end up with eight different sizes of grey.
+   */
+  hint?: ReactNode;
   icon?: LucideIcon;
   tone?: StatTone;
 }) {
@@ -36,6 +46,7 @@ export function StatCard({
       <div className="min-w-0">
         <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</div>
         <div className="mt-0.5 truncate text-lg font-semibold text-gray-900">{value}</div>
+        {hint && <div className="truncate text-xs text-gray-500">{hint}</div>}
       </div>
     </div>
   );

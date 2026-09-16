@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { strings } from '../lib/strings';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -105,9 +106,11 @@ export function LoginPage() {
       <AuthLayout
         title="Verify it's you"
         subtitle={
-          sentTo
-            ? `We've emailed a one-time code to ${sentTo}. Enter it below to finish signing in.`
-            : 'Enter the one-time code we emailed you to finish signing in.'
+          challenge.method === 'totp'
+            ? 'Open your authenticator app and enter the code it shows.'
+            : sentTo
+              ? `We've emailed a one-time code to ${sentTo}. Enter it below to finish signing in.`
+              : 'Enter the one-time code we emailed you to finish signing in.'
         }
         footer={
           <button
@@ -118,7 +121,7 @@ export function LoginPage() {
             }}
             className="font-medium text-brand hover:underline"
           >
-            Back to sign in
+            {strings.action.backToSignIn}
           </button>
         }
       >
@@ -132,32 +135,43 @@ export function LoginPage() {
               </span>
             </Alert>
           )}
-          <FormField htmlFor="otp" label="One-time code" required>
+          <FormField
+            htmlFor="otp"
+            label={challenge.method === 'totp' ? 'Code from your app' : 'One-time code'}
+            hint={
+              challenge.method === 'totp' && challenge.recoveryAvailable
+                ? 'Lost your phone? Enter one of your recovery codes instead.'
+                : undefined
+            }
+            required
+          >
             {(field) => (
               <Input
                 {...field}
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                placeholder="123456"
+                placeholder={strings.example.oneTimeCode}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
               />
             )}
           </FormField>
           <Button type="submit" className="w-full" isLoading={verifying} disabled={code.length < 4}>
-            Verify <ArrowRight size={16} className="ml-1.5" />
+            Verify <ArrowRight size={16} className="ms-1.5" />
           </Button>
-          <div className="text-center text-sm text-gray-500">
-            Didn&apos;t get a code?{' '}
-            <button
-              type="button"
-              onClick={onResend}
-              disabled={resendIn > 0}
-              className="font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:text-gray-500 disabled:no-underline"
-            >
-              {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend'}
-            </button>
-          </div>
+          {challenge.method === 'email' && (
+            <div className="text-center text-sm text-gray-500">
+              Didn&apos;t get a code?{' '}
+              <button
+                type="button"
+                onClick={onResend}
+                disabled={resendIn > 0}
+                className="font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:text-gray-500 disabled:no-underline"
+              >
+                {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend'}
+              </button>
+            </div>
+          )}
         </form>
       </AuthLayout>
     );
@@ -187,12 +201,17 @@ export function LoginPage() {
     >
       <form onSubmit={onSubmit} className="space-y-5">
         {error && <Alert tone="danger">{error}</Alert>}
-        <FormField htmlFor="email" label="Email" error={errors.email?.message} required>
+        <FormField
+          htmlFor="email"
+          label={strings.field.email}
+          error={errors.email?.message}
+          required
+        >
           {(field) => (
             <Input
               type="email"
               autoComplete="email"
-              placeholder="you@example.com"
+              placeholder={strings.example.email}
               {...field}
               {...register('email')}
             />
@@ -209,14 +228,14 @@ export function LoginPage() {
               />
             )}
           </FormField>
-          <div className="mt-2 text-right">
+          <div className="mt-2 text-end">
             <Link to="/forgot-password" className="text-sm font-medium text-brand hover:underline">
               Forgot password?
             </Link>
           </div>
         </div>
         <Button type="submit" className="w-full" isLoading={isSubmitting}>
-          Sign in <ArrowRight size={16} className="ml-1.5" />
+          Sign in <ArrowRight size={16} className="ms-1.5" />
         </Button>
       </form>
     </AuthLayout>

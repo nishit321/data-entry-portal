@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   UnauthorizedException,
   ConflictException,
@@ -8,8 +9,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AuditAction, Role, User } from '@prisma/client';
+import { AuditAction, MfaMethod, Role, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { TotpService } from './totp.service';
+import { SMS_PROVIDER, SmsProvider } from '../notifications/sms/sms-provider';
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
 import { ResetConfig, SecurityConfig } from '../config/configuration';
@@ -43,11 +46,15 @@ export interface AuthResult {
   user: PublicUser;
 }
 
-/** Returned by login when MFA is on: the token is withheld until OTP is verified. */
+/** Returned by login when MFA is on: the token is withheld until the second factor is cleared. */
 export interface MfaChallenge {
   mfaRequired: true;
   challengeId: string;
   expiresInSec: number;
+  /** Which factor to ask for. The screen cannot guess, and asking for the wrong one is a dead end. */
+  method: 'email' | 'totp';
+  /** Whether a recovery code would also be accepted, so the screen can offer that way out. */
+  recoveryAvailable?: boolean;
   /** Only outside production: the static demo OTP, so testers can proceed. */
   devOtp?: string;
 }
@@ -67,6 +74,8 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly mail: MailService,
     private readonly audit: AuditService,
+    private readonly totp: TotpService,
+    @Inject(SMS_PROVIDER) private readonly sms: SmsProvider,
   ) {}
 
   private signToken(user: Pick<User, 'id' | 'email' | 'role' | 'entityId'>): string {
@@ -204,11 +213,64 @@ export class AuthService {
       data: { failedLoginAttempts: 0, lockedUntil: null },
     });
 
-    // MFA gate: withhold the token until an OTP challenge is verified.
+    // MFA gate: withhold the token until the second factor is cleared.
     if (security.mfaEnabled && user.mfaEnabled) {
+      /*
+       * An authenticator app takes precedence, and no email is sent when one is set up.
+       *
+       * Offering both would make the account only as strong as the weaker one: an attacker who
+       * can read the mailbox would simply choose email, and the whole reason for the app — not
+       * depending on a third party being up, or on a mailbox staying private — would be gone. A
+       * lost phone is covered by the recovery codes, which is what they are for.
+       */
+      if (user.totpConfirmedAt) {
+        return this.issueTotpChallenge(user, security, ctx);
+      }
       return this.issueOtpChallenge(user, security, ctx);
     }
     return this.completeLogin(user, ctx);
+  }
+
+  /**
+   * Open a challenge waiting on the authenticator app.
+   *
+   * Nothing is sent and nothing is generated here: the code already exists on a device this server
+   * never talks to. The row exists only to hold the half-finished sign-in, so the token stays
+   * withheld and the attempt count still applies.
+   */
+  private async issueTotpChallenge(
+    user: User,
+    security: SecurityConfig,
+    ctx: RequestContext,
+  ): Promise<MfaChallenge> {
+    const expiresAt = new Date(Date.now() + security.otpTtlMin * 60_000);
+    await this.prisma.otpChallenge.updateMany({
+      where: { userId: user.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    const challenge = await this.prisma.otpChallenge.create({
+      data: { userId: user.id, method: MfaMethod.TOTP, codeHash: null, expiresAt },
+    });
+
+    await this.audit.record({
+      action: AuditAction.USER_MFA_CHALLENGED,
+      actorId: user.id,
+      entityType: 'User',
+      entityId: user.id,
+      metadata: { method: 'totp' },
+      context: ctx,
+    });
+
+    const recoveryAvailable =
+      (await this.prisma.totpRecoveryCode.count({ where: { userId: user.id, usedAt: null } })) > 0;
+
+    return {
+      mfaRequired: true,
+      challengeId: challenge.id,
+      method: 'totp',
+      expiresInSec: security.otpTtlMin * 60,
+      recoveryAvailable,
+    };
   }
 
   /** Issue (and "deliver") an OTP challenge; supersedes any outstanding one. */
@@ -239,6 +301,33 @@ export class AuthService {
       code,
       security.otpTtlMin,
     );
+
+    /*
+     * And by text, when the account has a confirmed number (Q8: "In-app + email + SMS ... OTP
+     * delivery").
+     *
+     * As well as email, never instead of it. Q8's own words are "never rely on SMS alone", and the
+     * reason cuts both ways: a message that fails to arrive on a network having a bad afternoon
+     * must not be the only thing standing between an operator and a deadline. Two channels, one
+     * code.
+     *
+     * Only a *confirmed* number, and failures are swallowed. The email has already gone; refusing
+     * the sign-in because a text did not send would turn a second convenience into a second thing
+     * that can lock somebody out.
+     */
+    if (user.phone && user.phoneVerifiedAt && this.sms.isConfigured()) {
+      try {
+        await this.sms.send(
+          user.phone,
+          `${code} is your NCA Portal sign-in code. It expires in ${security.otpTtlMin} minutes.`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Could not text the sign-in code to user ${user.id}: ` +
+            (error instanceof Error ? error.message : 'the gateway did not answer'),
+        );
+      }
+    }
     await this.audit.record({
       action: AuditAction.USER_MFA_CHALLENGED,
       actorId: user.id,
@@ -250,6 +339,7 @@ export class AuthService {
     return {
       mfaRequired: true,
       challengeId: challenge.id,
+      method: 'email',
       expiresInSec: security.otpTtlMin * 60,
       // Echoing the code hands the second factor to whoever asked for the first, so it is off
       // unless deliberately switched on for a demo with no delivery channel.
@@ -279,7 +369,14 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: challenge.userId } });
     if (!user || !user.isActive || user.deletedAt) throw invalid;
 
-    if (hashToken(dto.code) !== challenge.codeHash) {
+    const accepted =
+      challenge.method === MfaMethod.TOTP
+        ? // The app's code, or a recovery code. The service decides which by shape and spends a
+          // recovery code at most once.
+          await this.totp.verifyForUser(user, dto.code)
+        : Boolean(challenge.codeHash) && hashToken(dto.code) === challenge.codeHash;
+
+    if (!accepted) {
       await this.prisma.otpChallenge.update({
         where: { id: challenge.id },
         data: { attempts: challenge.attempts + 1 },
@@ -298,6 +395,19 @@ export class AuthService {
       where: { id: challenge.id },
       data: { consumedAt: new Date() },
     });
+
+    // A recovery code being spent is worth its own entry: it means somebody has lost their phone,
+    // or somebody else has their codes, and either way it should be visible afterwards.
+    if (challenge.method === MfaMethod.TOTP && !/^\d{6}$/.test(dto.code.trim())) {
+      await this.audit.record({
+        action: AuditAction.USER_TOTP_RECOVERY_USED,
+        actorId: user.id,
+        entityType: 'User',
+        entityId: user.id,
+        context: ctx,
+      });
+    }
+
     return this.completeLogin(user, ctx);
   }
 
@@ -313,6 +423,21 @@ export class AuthService {
     if (!challenge) throw invalid;
     const user = await this.prisma.user.findUnique({ where: { id: challenge.userId } });
     if (!user || !user.isActive || user.deletedAt) throw invalid;
+
+    /*
+     * Never downgrade an account that has an authenticator app.
+     *
+     * Without this, anyone holding the password could ask for an emailed code instead and the app
+     * would count for nothing: the account would be exactly as strong as the mailbox. There is
+     * nothing to resend for a TOTP challenge anyway — the code is generated on a device this
+     * server never speaks to — and a lost phone is what the recovery codes are for.
+     */
+    if (user.totpConfirmedAt) {
+      throw new BadRequestException(
+        'This account uses an authenticator app. Enter the code from the app, or use one of your ' +
+          'recovery codes.',
+      );
+    }
     return this.issueOtpChallenge(user, security, ctx);
   }
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Mail, Plus, Send, Trash2, X } from 'lucide-react';
 import {
@@ -8,6 +9,7 @@ import {
   Card,
   Combobox,
   ConfirmDialog,
+  DatePicker,
   EmptyState,
   Field,
   IconButton,
@@ -25,11 +27,15 @@ import { getErrorMessage } from '../lib/api';
 import { formatDateTime, joinMeta } from '../lib/format';
 import { useAuth } from '../context/AuthContext';
 import {
+  REPORT_COVERAGE_HINTS,
+  REPORT_COVERAGE_LABELS,
+  REPORT_COVERAGES,
   REPORT_FREQUENCIES,
   REPORT_FREQUENCY_LABELS,
   SCHEDULED_REPORT_KINDS,
   SCHEDULED_REPORT_KIND_LABELS,
   WEEKDAY_LABELS,
+  type ReportCoverage,
   type ReportFrequency,
   type ReportSchedule,
   type ScheduledReportKind,
@@ -43,21 +49,67 @@ const FREQUENCY_OPTIONS = REPORT_FREQUENCIES.map((f) => ({
   value: f,
   label: REPORT_FREQUENCY_LABELS[f],
 }));
-const WEEKDAY_OPTIONS = WEEKDAY_LABELS.map((label, i) => ({ value: String(i + 1), label }));
-const MONTH_DAY_OPTIONS = Array.from({ length: 28 }, (_, i) => ({
-  value: String(i + 1),
-  label: `Day ${i + 1}`,
-}));
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
   value: String(i),
   label: `${String(i).padStart(2, '0')}:00`,
 }));
+const COVERAGE_OPTIONS = REPORT_COVERAGES.map((c) => ({
+  value: c,
+  label: REPORT_COVERAGE_LABELS[c],
+}));
+
+/**
+ * The last day of the month a monthly schedule may key off.
+ *
+ * February is why. A report set for the 30th would have no date at all in most Februaries, and a
+ * schedule that silently skips a month is worse than one that goes out three days early.
+ */
+const LAST_SAFE_DAY = 28;
+
+/** The ordinal a reader would say out loud: 1st, 2nd, 3rd, 21st. */
+function ordinal(day: number): string {
+  if (day % 100 >= 11 && day % 100 <= 13) return `${day}th`;
+  return `${day}${['th', 'st', 'nd', 'rd'][day % 10] ?? 'th'}`;
+}
+
+/** Monday is 1, matching the way the day is stored; JavaScript puts Sunday at 0. */
+function isoDayOfWeek(date: Date): number {
+  const day = date.getDay();
+  return day === 0 ? 7 : day;
+}
+
+/**
+ * The recurring day a picked date stands for.
+ *
+ * The calendar is how the day is chosen, not what is stored. A schedule repeats, so what it keeps
+ * is "the 15th of each month" or "every Tuesday" — picking a date is simply a more concrete way of
+ * saying which. Returns null when the date is one a monthly schedule could not repeat on.
+ */
+function dayFromDate(iso: string, frequency: ReportFrequency): number | null {
+  if (!iso) return null;
+  const date = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (frequency === 'WEEKLY') return isoDayOfWeek(date);
+  return date.getDate() > LAST_SAFE_DAY ? null : date.getDate();
+}
+
+/** What the picked date means, said back to the person who picked it. */
+function recurrence(iso: string, frequency: ReportFrequency): string | null {
+  const day = dayFromDate(iso, frequency);
+  if (day === null) return null;
+  if (frequency === 'WEEKLY') return `Goes out every ${WEEKDAY_LABELS[day - 1]}.`;
+  if (frequency === 'QUARTERLY') {
+    return `Goes out on the ${ordinal(day)} of January, April, July and October.`;
+  }
+  return `Goes out on the ${ordinal(day)} of every month.`;
+}
 
 const BLANK = {
   name: '',
   kind: 'COMPLIANCE_WORKBOOK' as ScheduledReportKind,
   frequency: 'MONTHLY' as ReportFrequency,
-  dayOfPeriod: '1',
+  coverage: 'LAST_CLOSED_PERIOD' as ReportCoverage,
+  runDate: '',
   hour: '7',
 };
 
@@ -67,10 +119,21 @@ function timetable(schedule: ReportSchedule): string {
   if (schedule.frequency === 'WEEKLY') {
     return `Every ${WEEKDAY_LABELS[schedule.dayOfPeriod - 1] ?? 'Monday'} at ${time}`;
   }
-  const day = `day ${schedule.dayOfPeriod}`;
+  const day = `the ${ordinal(schedule.dayOfPeriod)}`;
   return schedule.frequency === 'QUARTERLY'
     ? `Quarterly, on ${day} of January, April, July and October at ${time}`
     : `Monthly, on ${day} at ${time}`;
+}
+
+/**
+ * What each run of a schedule covers.
+ *
+ * On the row rather than only in the form, because it is the difference between two reports that
+ * are otherwise described identically. Somebody looking at a list of schedules cannot tell a levy
+ * statement for last quarter from one that restates itself every month without it.
+ */
+function coverageLine(schedule: ReportSchedule): string {
+  return REPORT_COVERAGE_LABELS[schedule.coverage];
 }
 
 /**
@@ -108,7 +171,10 @@ export function ScheduledReportsPage() {
         name: form.name.trim(),
         kind: form.kind,
         frequency: form.frequency,
-        dayOfPeriod: Number(form.dayOfPeriod),
+        coverage: form.coverage,
+        // Non-null by the time this runs: the submit button is disabled until the picked date is
+        // one the schedule can actually repeat on.
+        dayOfPeriod: dayFromDate(form.runDate, form.frequency) ?? 1,
         hour: Number(form.hour),
         recipientIds: recipients.map((r) => r.id),
       };
@@ -152,7 +218,13 @@ export function ScheduledReportsPage() {
     onError: (err) => toast.error(getErrorMessage(err, "We couldn't remove that schedule.")),
   });
 
-  const dayOptions = form.frequency === 'WEEKLY' ? WEEKDAY_OPTIONS : MONTH_DAY_OPTIONS;
+  const runsOn = recurrence(form.runDate, form.frequency);
+  // A date has been picked but a monthly schedule could not repeat on it. Said where the date was
+  // chosen, rather than as a failure after pressing the button.
+  const dayProblem =
+    form.runDate && runsOn === null
+      ? `A report set for the ${ordinal(new Date(`${form.runDate}T00:00:00`).getDate())} would have no date in February. Pick a day up to the ${LAST_SAFE_DAY}th.`
+      : null;
 
   return (
     <Page>
@@ -194,6 +266,7 @@ export function ScheduledReportsPage() {
                     <p className="mt-1 text-xs text-gray-500">
                       {joinMeta(
                         SCHEDULED_REPORT_KIND_LABELS[schedule.kind],
+                        coverageLine(schedule),
                         `${schedule.recipients.length} ${
                           schedule.recipients.length === 1 ? 'recipient' : 'recipients'
                         }`,
@@ -262,9 +335,14 @@ export function ScheduledReportsPage() {
 
       <Modal open={open} title="Schedule a report" onClose={() => setOpen(false)}>
         <div className="space-y-4">
-          <Field label="Name" htmlFor="rep-name" hint="What the email is titled when it arrives.">
+          <Field
+            label={strings.field.name}
+            htmlFor="rep-name"
+            hint="What the email is titled when it arrives."
+          >
             <Input
               id="rep-name"
+              placeholder="e.g. Monthly compliance summary"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
@@ -277,36 +355,54 @@ export function ScheduledReportsPage() {
               onChange={(kind) => setForm({ ...form, kind: kind as ScheduledReportKind })}
             />
           </Field>
+          <Field
+            label="What each report covers"
+            htmlFor="rep-coverage"
+            hint={REPORT_COVERAGE_HINTS[form.coverage]}
+          >
+            <Select
+              aria-label="What each report covers"
+              options={COVERAGE_OPTIONS}
+              value={form.coverage}
+              onChange={(coverage) => setForm({ ...form, coverage: coverage as ReportCoverage })}
+            />
+          </Field>
           <Field label="How often" htmlFor="rep-freq">
             <Select
               aria-label="How often it goes out"
               options={FREQUENCY_OPTIONS}
               value={form.frequency}
               onChange={(frequency) =>
-                setForm({
-                  ...form,
-                  frequency: frequency as ReportFrequency,
-                  // The day means a different thing for a weekly schedule, so start it over.
-                  dayOfPeriod: '1',
-                })
+                setForm({ ...form, frequency: frequency as ReportFrequency })
               }
             />
           </Field>
           <div className="flex gap-4">
             <Field
-              label={form.frequency === 'WEEKLY' ? 'Day of the week' : 'Day of the month'}
+              label="Day it goes out"
               htmlFor="rep-day"
-              hint={
-                form.frequency === 'WEEKLY'
-                  ? undefined
-                  : 'Up to the 28th, so it has a date in February too.'
-              }
+              /*
+               * A calendar, not a list of numbers from 1 to 28.
+               *
+               * The schedule repeats, so what it keeps is the day rather than the date: pick the
+               * 15th of any month and it goes out on the 15th of every month. Picking it off a
+               * calendar is the more concrete way of saying which day, and the line underneath
+               * states the rule it produced so nobody has to infer it.
+               */
+              hint={runsOn ?? undefined}
+              error={dayProblem ?? undefined}
             >
-              <Select
+              {/*
+                No `min`. A schedule repeats, so a date earlier this month is a perfectly good way
+                of saying "the 12th" — the first run is simply next month. Blocking the past here
+                would grey out half the calendar for no reason a reader could work out.
+              */}
+              <DatePicker
+                id="rep-day"
                 aria-label="Day it goes out"
-                options={dayOptions}
-                value={form.dayOfPeriod}
-                onChange={(dayOfPeriod) => setForm({ ...form, dayOfPeriod })}
+                value={form.runDate}
+                invalid={Boolean(dayProblem)}
+                onChange={(runDate) => setForm({ ...form, runDate })}
               />
             </Field>
             <Field label="Time" htmlFor="rep-hour">
@@ -342,7 +438,7 @@ export function ScheduledReportsPage() {
               {recipients.map((r) => (
                 <span
                   key={r.id}
-                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 py-0.5 pl-2.5 pr-1 text-xs text-gray-700"
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 py-0.5 ps-2.5 pe-1 text-xs text-gray-700"
                 >
                   {r.label}
                   <button
@@ -360,12 +456,12 @@ export function ScheduledReportsPage() {
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               icon={Mail}
               isLoading={create.isPending}
-              disabled={form.name.trim().length < 2 || recipients.length === 0}
+              disabled={form.name.trim().length < 2 || recipients.length === 0 || runsOn === null}
               onClick={() => create.mutate()}
             >
               Schedule it

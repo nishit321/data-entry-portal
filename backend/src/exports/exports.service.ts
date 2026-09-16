@@ -27,6 +27,19 @@ function moneyLabel(value: number | null): string {
 }
 
 /**
+ * The same amount in USD, or an honest blank.
+ *
+ * "Not converted" rather than "Not calculated": the figure exists and is sound, what is missing is
+ * the exchange rate for that period. A reader who sees the SSP column filled and the USD column
+ * empty is owed the difference between those two statements.
+ */
+function usdLabel(value: number | null): string {
+  return value === null
+    ? 'Not converted'
+    : `USD ${value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
  * On-demand PDF/Excel exports of the analytics and levy views.
  *
  * Every export goes through the same scoped service the screen uses, rather than querying the
@@ -123,9 +136,21 @@ export class ExportsService {
       workbook,
       'Levy assessment',
       `Levy assessment${a.period ? `, ${a.period.label}` : ''}`,
-      a.rate
-        ? `Assessed at ${a.rate.ratePercent}% of approved revenue.`
-        : 'No levy rate is configured for this period; revenue is shown without a levy.',
+      [
+        a.rate
+          ? `Assessed at ${a.rate.ratePercent}% of approved revenue.`
+          : 'No levy rate is configured for this period; revenue is shown without a levy.',
+        /*
+         * The rate is stated on the sheet, not left implicit.
+         *
+         * This file leaves the building. Somebody comparing two years of USD columns has to be
+         * able to see why they differ, and the answer is usually the rate rather than the
+         * business. A conversion whose rate is not on the page is a claim nobody can check.
+         */
+        a.exchange
+          ? `Converted at SSP ${a.exchange.sspPerUsd.toLocaleString('en-GB')} to USD 1, the rate set for this period.`
+          : 'No exchange rate is set for this period, so the USD columns are empty.',
+      ].join(' '),
       [
         { header: 'Operator', key: 'operator', width: 34 },
         { header: 'Type', key: 'type', width: 10 },
@@ -136,15 +161,36 @@ export class ExportsService {
           numFmt: NUMBER_FORMAT.money,
         },
         { header: 'Levy due (SSP)', key: 'levy', width: 20, numFmt: NUMBER_FORMAT.money },
+        {
+          header: 'Assessable revenue (USD)',
+          key: 'revenueUsd',
+          width: 24,
+          numFmt: NUMBER_FORMAT.money,
+        },
+        { header: 'Levy due (USD)', key: 'levyUsd', width: 20, numFmt: NUMBER_FORMAT.money },
       ],
     );
 
     a.rows.forEach((r) =>
-      sheet.addRow([r.entity.name, r.entity.type, r.assessableRevenue, r.levyDue]),
+      sheet.addRow([
+        r.entity.name,
+        r.entity.type,
+        r.assessableRevenue,
+        r.levyDue,
+        r.assessableRevenueUsd,
+        r.levyDueUsd,
+      ]),
     );
 
     if (a.rows.length > 0) {
-      const total = sheet.addRow(['Total', '', a.totals.totalRevenue, a.totals.totalLevyDue]);
+      const total = sheet.addRow([
+        'Total',
+        '',
+        a.totals.totalRevenue,
+        a.totals.totalLevyDue,
+        a.totals.totalRevenueUsd,
+        a.totals.totalLevyDueUsd,
+      ]);
       total.font = { bold: true };
     }
 
@@ -167,6 +213,14 @@ export class ExportsService {
       ['Rate applied', a.rate ? `${a.rate.ratePercent}%` : 'No rate configured'],
       ['Assessable revenue', moneyLabel(a.totals.totalRevenue)],
       ['Levy due', moneyLabel(a.totals.totalLevyDue)],
+      ['Assessable revenue (USD)', usdLabel(a.totals.totalRevenueUsd)],
+      ['Levy due (USD)', usdLabel(a.totals.totalLevyDueUsd)],
+      [
+        'Exchange rate',
+        a.exchange
+          ? `SSP ${a.exchange.sspPerUsd.toLocaleString('en-GB')} to USD 1`
+          : 'Not set for this period',
+      ],
       ['Operators assessed', String(a.totals.operatorsAssessed)],
     ]);
 
@@ -174,11 +228,24 @@ export class ExportsService {
       addTable(
         doc,
         [
-          { header: 'Operator', width: 200 },
-          { header: 'Assessable revenue', width: 150, align: 'right' },
-          { header: 'Levy due', width: 145, align: 'right' },
+          { header: 'Operator', width: 150 },
+          { header: 'Assessable revenue', width: 115, align: 'right' },
+          { header: 'Levy due', width: 110, align: 'right' },
+          { header: 'Levy due (USD)', width: 110, align: 'right' },
         ],
-        a.rows.map((r) => [r.entity.name, moneyLabel(r.assessableRevenue), moneyLabel(r.levyDue)]),
+        /*
+         * Only the levy is repeated in USD, not the revenue as well.
+         *
+         * Four money columns on a portrait page leaves each one too narrow to read, and the levy
+         * is the figure this notice is about — the revenue is how it was arrived at. The full
+         * four-column breakdown is in the spreadsheet for anyone who needs it.
+         */
+        a.rows.map((r) => [
+          r.entity.name,
+          moneyLabel(r.assessableRevenue),
+          moneyLabel(r.levyDue),
+          usdLabel(r.levyDueUsd),
+        ]),
       );
     }
 

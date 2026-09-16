@@ -13,6 +13,7 @@ import { Role } from '@prisma/client';
 import { GeoService } from './geo.service';
 import { CreateNetworkSiteDto, UpdateNetworkSiteDto } from './dto/network-site.dto';
 import { MapQueryDto, NetworkSiteQueryDto } from './dto/geo-query.dto';
+import { CreateFibreLinkDto, FibreLinkQueryDto, UpdateFibreLinkDto } from './dto/fibre-link.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ClientContext } from '../common/decorators/client-context.decorator';
@@ -41,6 +42,12 @@ export class GeoController {
   @Roles(...OPERATOR_ROLES, ...AUTHORITY_ROLES)
   list(@CurrentUser() user: AuthUser, @Query() query: NetworkSiteQueryDto) {
     return this.geo.findAll(user, query);
+  }
+
+  @Get('sites/:id')
+  @Roles(...OPERATOR_ROLES, ...AUTHORITY_ROLES)
+  findOne(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.geo.findOne(user, id);
   }
 
   @Post('sites')
@@ -72,5 +79,49 @@ export class GeoController {
     @ClientContext() ctx: RequestContext,
   ) {
     return this.geo.remove(user, id, ctx);
+  }
+
+  /*
+   * Fibre routes (NCA, 15 September 2026).
+   *
+   * Scoped and written exactly as sites are, because they are part of the same register: an
+   * operator keeps its own routes, the Authority reads the sector, and an administrator may
+   * correct a record on an operator's behalf.
+   */
+  @Get('links')
+  @Roles(...OPERATOR_ROLES, ...AUTHORITY_ROLES)
+  listLinks(@CurrentUser() user: AuthUser, @Query() query: FibreLinkQueryDto) {
+    return this.geo.findAllLinks(user, query);
+  }
+
+  @Post('links')
+  @Roles(...OPERATOR_ROLES, Role.ADMIN)
+  createLink(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateFibreLinkDto,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.geo.createLink(user, dto, ctx);
+  }
+
+  @Patch('links/:id')
+  @Roles(...OPERATOR_ROLES, Role.ADMIN)
+  updateLink(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFibreLinkDto,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.geo.updateLink(user, id, dto, ctx);
+  }
+
+  @Delete('links/:id')
+  @Roles(...OPERATOR_ROLES, Role.ADMIN)
+  removeLink(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.geo.removeLink(user, id, ctx);
   }
 }

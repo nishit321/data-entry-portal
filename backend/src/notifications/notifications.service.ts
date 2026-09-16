@@ -16,7 +16,7 @@ import {
   NotificationMessage,
   SmsNotificationChannel,
 } from './channels';
-import { SmsSendResult } from './sms/sms-provider';
+import { SmsSendError, SmsSendResult } from './sms/sms-provider';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 
 /** How many times to attempt an external send before marking the delivery failed. */
@@ -221,6 +221,32 @@ export class NotificationsService {
   }
 
   /** A citizen has filed a complaint: tell the Authority so it does not sit unseen (in-app). */
+  /**
+   * Tell somebody their second factor was removed for them, and by whom.
+   *
+   * This is the detection control, not a courtesy. Resetting a second factor is also how an
+   * account is taken over: an administrator account in the wrong hands can strip the protection off
+   * anyone. The person it happened to is the only one certain to notice that they never asked for
+   * it, so they are told through every channel they have.
+   */
+  async mfaResetByAdmin(args: { userId: string; byName: string }): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: args.userId },
+      select: recipientSelect,
+    });
+    if (!user) return;
+
+    await this.createFor([user], {
+      type: NotificationType.SECURITY_MFA_RESET,
+      title: 'Your authenticator app was removed',
+      body:
+        `${args.byName} removed the authenticator app from your account. You will be sent a ` +
+        'code by email when you next sign in. If you did not ask for this, tell the Authority now.',
+      linkPath: '/profile',
+      alsoEmail: true,
+    });
+  }
+
   async complaintReceived(args: {
     referenceNumber: string;
     subject: string;
@@ -342,8 +368,21 @@ export class NotificationsService {
   /** Persist an in-app notification for each recipient and (optionally) push it to email. */
   private async createFor(recipients: Recipient[], args: CreateArgs): Promise<void> {
     if (recipients.length === 0) return;
-    try {
-      for (const recipient of recipients) {
+    /*
+     * The guard is per recipient, not per event.
+     *
+     * It used to wrap the whole loop, so one bad recipient took everybody after them down with
+     * it: an account deleted between reading the list and writing the row throws a foreign-key
+     * error, the loop aborts, and the people who still get their notification are decided by
+     * their position in an unordered query. Nobody is told, because the error is caught and
+     * logged as one failed event.
+     *
+     * That is the wrong shape for a regulator's queue. An approver not hearing that a return is
+     * waiting, because an unrelated account was being tidied up at that moment, is a missed
+     * deadline with no trace of a cause.
+     */
+    for (const recipient of recipients) {
+      try {
         const notification = await this.prisma.notification.create({
           data: {
             recipientId: recipient.id,
@@ -369,10 +408,12 @@ export class NotificationsService {
         // Independent of email: an operator whose licence has expired should hear about it even if
         // the mail provider is having a bad morning.
         await this.deliverSms(notification.id, message);
+      } catch (err) {
+        // Never let a notification failure break the action that triggered it, nor the
+        // notifications owed to everybody else. The recipient is named by id, not by email: this
+        // line ends up in logs that are read by more people than the notification was for.
+        this.logger.error(`Failed to notify ${recipient.id} (${args.type})`, err as Error);
       }
-    } catch (err) {
-      // Never let a notification failure break the action that triggered it.
-      this.logger.error(`Failed to create notifications (${args.type})`, err as Error);
     }
   }
 
@@ -400,10 +441,16 @@ export class NotificationsService {
   /**
    * Attempt the SMS channel, recording the outcome on the notification.
    *
-   * No retry loop, unlike email. A text message that failed because the number is wrong or the
-   * balance is spent will fail again a second later, and each attempt costs money. The outcome is
-   * recorded and the scheduled retry sweep can pick it up later if NCA wants that; hammering the
-   * gateway inside the request is not the way.
+   * No retry loop, unlike email, and there are now two reasons rather than one.
+   *
+   * The first was cost: a text that failed because the number is wrong or the balance is spent
+   * will fail again a second later, and each attempt is charged.
+   *
+   * The second was learned from the gateway itself. On 3 September 2026 it answered `403 Failed`
+   * for four messages and delivered at least one of them to the handset. **A failure it reports is
+   * not proof that nothing was sent.** Retrying on that signal would send an operator the same
+   * compliance warning two or three times, which is worse than not retrying at all. The outcome is
+   * recorded, and a person decides.
    */
   private async deliverSms(notificationId: string, message: NotificationMessage): Promise<void> {
     const channel = this.channels.find((c) => c.name === 'sms' && c.isEnabled());
@@ -423,7 +470,21 @@ export class NotificationsService {
         },
       });
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
+      /*
+       * The status goes into the record with the message, because the two together are what a
+       * person needs later and neither is enough alone.
+       *
+       * Measured against the real gateway on 3 September 2026: a `404 Sender ID "X" is not
+       * authorized` means the message certainly did not go, while a `403 Failed` was recorded by
+       * the vendor as failed and **arrived on the handset anyway**. Storing only "Failed" makes
+       * those two indistinguishable in the audit trail, and they are not the same fact.
+       */
+      const reason =
+        err instanceof SmsSendError
+          ? `${err.status ?? 'no status'}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : String(err);
       this.logger.warn(`SMS delivery failed: ${reason}`);
       await this.prisma.notification.update({
         where: { id: notificationId },

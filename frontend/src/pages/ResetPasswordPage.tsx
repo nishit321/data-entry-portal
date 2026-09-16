@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -53,7 +54,8 @@ export function ResetPasswordPage() {
           to="/login"
           className="inline-flex items-center font-medium text-brand hover:underline"
         >
-          <ArrowLeft size={15} className="mr-1" /> Back to sign in
+          <ArrowLeft size={15} className="me-1" />
+          {strings.action.backToSignIn}
         </Link>
       }
     >

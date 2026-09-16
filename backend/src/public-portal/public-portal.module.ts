@@ -3,6 +3,7 @@ import { PublicPortalController } from './public-portal.controller';
 import { PublicPortalService } from './public-portal.service';
 import { PublicIndicatorsController } from './public-indicators.controller';
 import { PublicIndicatorsService } from './public-indicators.service';
+import { PublicExportsService } from './public-exports.service';
 
 /**
  * The public, unauthenticated view of the sector (Q4, Phase 2), and the allowlist that governs it.
@@ -11,7 +12,7 @@ import { PublicIndicatorsService } from './public-indicators.service';
  */
 @Module({
   controllers: [PublicPortalController, PublicIndicatorsController],
-  providers: [PublicPortalService, PublicIndicatorsService],
+  providers: [PublicPortalService, PublicIndicatorsService, PublicExportsService],
   exports: [PublicPortalService],
 })
 export class PublicPortalModule {}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import {
@@ -163,6 +164,7 @@ export function SigningCertificatesPage() {
           >
             <Input
               id="cert-label"
+              placeholder="e.g. Finance signing key"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
             />
@@ -183,7 +185,7 @@ export function SigningCertificatesPage() {
           </Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={register.isPending}

@@ -124,7 +124,7 @@ export function ListShell({
           <Button variant="secondary" icon={Filter} onClick={() => setFiltersOpen(true)}>
             Filters
             {filterCount > 0 && (
-              <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 text-xs text-brand-700">
+              <span className="ms-1.5 rounded-full bg-brand-50 px-1.5 text-xs text-brand-700">
                 {filterCount}
               </span>
             )}
@@ -134,7 +134,7 @@ export function ListShell({
         {filters && !isSmall && filters}
 
         {/*
-          Table controls, pinned right. `ml-auto` keeps them right-aligned even when the row wraps
+          Table controls, pinned right. `ms-auto` keeps them right-aligned even when the row wraps
           and they end up on a line of their own.
 
           There is deliberately no pagination here any more. The full control is pinned directly
@@ -142,7 +142,7 @@ export function ListShell({
           repeating the range and the per-page selector in the toolbar just showed the same two
           numbers twice on the same screen.
         */}
-        <div className="ml-auto flex items-end gap-2">
+        <div className="ms-auto flex items-end gap-2">
           {actions}
           <Tooltip content={density === 'comfortable' ? 'Compact rows' : 'Comfortable rows'}>
             <button
@@ -164,7 +164,7 @@ export function ListShell({
           {activeFilters.map((chip) => (
             <span
               key={chip.key}
-              className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1 text-xs text-brand-800"
+              className="inline-flex items-center gap-1 rounded-full bg-brand-50 py-1 ps-2.5 pe-1 text-xs text-brand-800"
             >
               {chip.label}
               <button
@@ -231,7 +231,7 @@ export function ListShell({
                 Clear all
               </Button>
             )}
-            <Button className="ml-auto" onClick={() => setFiltersOpen(false)}>
+            <Button className="ms-auto" onClick={() => setFiltersOpen(false)}>
               Show results
             </Button>
           </div>

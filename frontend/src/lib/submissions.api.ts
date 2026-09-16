@@ -1,4 +1,5 @@
 import { api } from './api';
+import { fileNameFromDisposition, saveBlob } from './download';
 import type {
   Paginated,
   ReportingFrequency,
@@ -77,15 +78,7 @@ export const submissionsApi = {
    */
   downloadWorkbook: async (id: string, fallbackName = 'return.xlsx') => {
     const res = await api.get<Blob>(`/submissions/${id}/workbook`, { responseType: 'blob' });
-    const match = /filename="?([^"]+)"?/.exec(String(res.headers['content-disposition'] ?? ''));
-    const url = URL.createObjectURL(res.data);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = match?.[1] ?? fallbackName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(res.data, fileNameFromDisposition(res.headers['content-disposition'], fallbackName));
   },
 
   /** Load a filled workbook into the draft; returns what went in and what did not. */

@@ -1,17 +1,21 @@
 import { useEffect, useId, useMemo, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { MapPoint } from '../lib/types';
-import { MAP_KIND_COLOURS, MAP_KIND_LABELS } from './map-legend';
+import type { MapPoint, MapRoute } from '../lib/types';
+import { MAP_KIND_COLOURS, MAP_KIND_LABELS, ROUTE_COLOUR } from './map-legend';
 import { describeMap } from './map-summary';
 
 /**
  * Where the basemap tiles come from.
  *
- * Deliberately empty by default. Pointing this at a public tile service would send the coordinates
- * of every mast a reader looks at to a third party, which is exactly what Q5 rules out: NCA's data
- * and the keys to it stay under NCA's control. Set `VITE_MAP_TILE_URL` to NCA's own tile server and
- * the basemap appears; leave it unset and the map still plots every point, on a plain ground.
+ * NCA chose an open-source tile server (3 September 2026), and `.env.example` now points at
+ * OpenStreetMap's. Worth stating the trade plainly rather than treating it as settled: mast
+ * coordinates never leave the portal, but every tile request tells the tile server which part of
+ * the map somebody is looking at — and NCA's operators look at their own masts. That is a
+ * reasonable inference about where the Authority is working, sent to a third party.
+ *
+ * Running an OSM tile server inside NCA's own network answers it, and changes nothing else here.
+ * Left unset, the map still plots every point on a plain ground rather than failing.
  */
 const TILE_URL = import.meta.env.VITE_MAP_TILE_URL ?? '';
 const TILE_ATTRIBUTION = import.meta.env.VITE_MAP_TILE_ATTRIBUTION ?? '';
@@ -41,11 +45,16 @@ function escapeHtml(value: string): string {
  */
 export function NetworkMap({
   points,
+  routes = [],
+  showRoutes = true,
   showCoverage,
   className = '',
   listedIn,
 }: {
   points: MapPoint[];
+  /** Fibre routes between nodes on the register. */
+  routes?: MapRoute[];
+  showRoutes?: boolean;
   showCoverage: boolean;
   className?: string;
   /** Where the same points can be read as text, named so the summary can send a reader there. */
@@ -53,7 +62,13 @@ export function NetworkMap({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const summaryId = useId();
-  const summary = useMemo(() => describeMap(points, listedIn), [points, listedIn]);
+  // Memoised: `showRoutes ? routes : []` builds a new array on every render, which would make the
+  // redraw effect below fire on every render and drop the reader's pan and zoom as it went.
+  const drawnRoutes = useMemo(() => (showRoutes ? routes : []), [showRoutes, routes]);
+  const summary = useMemo(
+    () => describeMap(points, listedIn, drawnRoutes),
+    [points, listedIn, drawnRoutes],
+  );
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
 
@@ -86,6 +101,42 @@ export function NetworkMap({
 
     layer.clearLayers();
 
+    /*
+     * Routes first, so a pin is never buried under a line it ends at.
+     *
+     * A surveyed route is drawn solid; one that is only the straight line between two nodes is
+     * drawn dashed and says so when opened. They are the same colour because they are the same
+     * layer, and the difference is real: the dashed one is where the cable goes in principle, and
+     * nobody should read it off the map as where to dig.
+     */
+    for (const route of drawnRoutes) {
+      L.polyline(route.path, {
+        color: ROUTE_COLOUR,
+        weight: route.surveyed ? 3 : 2,
+        opacity: route.surveyed ? 0.85 : 0.5,
+        dashArray: route.surveyed ? undefined : '6 6',
+        // A class of its own. Coverage rings and pins are SVG paths in the same pane, so without
+        // it there is no way to ask the map how many routes it drew.
+        className: 'nca-fibre-route',
+      })
+        .bindPopup(
+          `<strong>${escapeHtml(route.name)}</strong><br>` +
+            `${escapeHtml(route.from)} to ${escapeHtml(route.to)}<br>` +
+            (route.lengthKm === null
+              ? ''
+              : `${escapeHtml(String(route.lengthKm))} km of fibre<br>`) +
+            (route.capacityGbps === null
+              ? ''
+              : `${escapeHtml(String(route.capacityGbps))} Gbit/s<br>`) +
+            `<span style="color:#6b7280">${escapeHtml(route.entity.name)}</span>` +
+            (route.surveyed
+              ? ''
+              : '<br><span style="color:#b45309">Straight line between the two nodes. ' +
+                'The surveyed route has not been supplied.</span>'),
+        )
+        .addTo(layer);
+    }
+
     for (const point of points) {
       const colour = MAP_KIND_COLOURS[point.kind] ?? MAP_KIND_COLOURS.OTHER;
 
@@ -115,11 +166,15 @@ export function NetworkMap({
     }
 
     // Frame whatever is on the map, so a reader is never left staring at the wrong continent.
-    if (points.length > 0) {
-      const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number]));
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    // Routes count: a map filtered down to routes alone would otherwise open over the Atlantic.
+    const framed: [number, number][] = [
+      ...points.map((p) => [p.lat, p.lng] as [number, number]),
+      ...drawnRoutes.flatMap((r) => r.path),
+    ];
+    if (framed.length > 0) {
+      map.fitBounds(L.latLngBounds(framed), { padding: [40, 40], maxZoom: 13 });
     }
-  }, [points, showCoverage]);
+  }, [points, drawnRoutes, showCoverage]);
 
   return (
     <div className={`relative ${className}`}>

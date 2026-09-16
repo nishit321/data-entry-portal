@@ -58,6 +58,35 @@ export const authApi = {
     api.post<{ phone: string }>('/auth/phone/verify', { code }).then((r) => r.data),
 
   removePhone: () => api.delete<void>('/auth/phone').then((r) => r.data),
+
+  // --- The caller's own authenticator app (Q8) ---
+
+  totpStatus: () =>
+    api
+      .get<{
+        available: boolean;
+        enabled: boolean;
+        confirmedAt: string | null;
+        recoveryCodesRemaining: number;
+      }>('/auth/totp')
+      .then((r) => r.data),
+
+  /** Mints a secret and returns something to scan. Switches nothing on. */
+  beginTotp: () =>
+    api.post<{ uri: string; qrSvg: string; secret: string }>('/auth/totp').then((r) => r.data),
+
+  /** A correct code switches it on. The recovery codes come back here and nowhere else. */
+  confirmTotp: (code: string) =>
+    api.post<{ recoveryCodes: string[] }>('/auth/totp/confirm', { code }).then((r) => r.data),
+
+  regenerateRecoveryCodes: (code: string) =>
+    api
+      .post<{ recoveryCodes: string[] }>('/auth/totp/recovery-codes', { code })
+      .then((r) => r.data),
+
+  /** A current code is required even though the caller is signed in. */
+  disableTotp: (code: string) =>
+    api.delete<void>('/auth/totp', { data: { code } }).then((r) => r.data),
 };
 
 // --- User administration endpoints (ADMIN only) ---
@@ -79,6 +108,13 @@ export const usersApi = {
 
   setRole: (id: string, role: Role) =>
     api.patch<User>(`/users/${id}/role`, { role }).then((r) => r.data),
+
+  /**
+   * Remove another user's authenticator app, for when the phone and the recovery codes are both
+   * gone. Never on yourself: the server refuses, and the screen does not offer it.
+   */
+  resetMfa: (id: string) =>
+    api.post<{ hadAuthenticatorApp: boolean }>(`/users/${id}/reset-mfa`).then((r) => r.data),
 
   update: (
     id: string,

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -365,9 +366,9 @@ export function ReportingPeriodsPage() {
       }}
       filters={
         <>
-          <FilterField label="Status" width="md">
+          <FilterField label={strings.field.status} width="md">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.status}
               options={STATUS_FILTER_OPTIONS}
               onChange={(status) => list.setFilters({ status })}
@@ -417,7 +418,7 @@ export function ReportingPeriodsPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : (
             <Button variant="secondary" onClick={openCreate}>
@@ -441,7 +442,7 @@ export function ReportingPeriodsPage() {
             </Alert>
             <div className="flex justify-end">
               <Button variant="secondary" onClick={() => setFormOpen(false)}>
-                Close
+                {strings.action.close}
               </Button>
             </div>
           </div>
@@ -452,7 +453,7 @@ export function ReportingPeriodsPage() {
               {!editing && (
                 <FormField
                   htmlFor="templateId"
-                  label="Template"
+                  label={strings.field.template}
                   error={errors.templateId?.message}
                   required
                 >
@@ -469,7 +470,7 @@ export function ReportingPeriodsPage() {
                           source={publishedTemplatePicker}
                           emptyLabel="Select a template"
                           placeholder="Search published templates…"
-                          aria-label="Template"
+                          aria-label={strings.field.template}
                         />
                       )}
                     />
@@ -501,13 +502,23 @@ export function ReportingPeriodsPage() {
                   )}
                 </FormField>
               )}
-              <FormField htmlFor="label" label="Label" error={errors.label?.message} required>
+              <FormField
+                htmlFor="label"
+                label={strings.field.label}
+                error={errors.label?.message}
+                required
+              >
                 {(field) => (
                   <Input {...field} placeholder="e.g. Q1 2026" {...form.register('label')} />
                 )}
               </FormField>
               {!editing && (
-                <FormField htmlFor="status" label="Status" error={errors.status?.message} required>
+                <FormField
+                  htmlFor="status"
+                  label={strings.field.status}
+                  error={errors.status?.message}
+                  required
+                >
                   {(field) => (
                     <Controller
                       control={form.control}
@@ -601,6 +612,7 @@ export function ReportingPeriodsPage() {
                   <Input
                     {...field}
                     type="number"
+                    placeholder="e.g. 5"
                     min={0}
                     max={60}
                     {...form.register('graceDays')}
@@ -610,7 +622,7 @@ export function ReportingPeriodsPage() {
             </div>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>
-                Cancel
+                {strings.action.cancel}
               </Button>
               <Button type="submit" isLoading={saveMutation.isPending}>
                 {editing ? 'Save changes' : 'Open period'}

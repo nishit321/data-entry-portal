@@ -259,7 +259,10 @@ export class ApiClientsService {
     for (const cidr of cleaned) {
       // Checked by shape. Finding a typo now beats finding it when the operator cannot connect.
       if (!isValidCidr(cidr)) {
-        throw new BadRequestException(`"${cidr}" is not an address or range we can match against.`);
+        throw new BadRequestException(
+          `"${cidr}" is not an IP address or range. Give a single address like 203.0.113.10, ` +
+            'or a range in CIDR form like 203.0.113.0/24.',
+        );
       }
     }
     return cleaned;

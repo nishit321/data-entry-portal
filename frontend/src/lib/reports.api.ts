@@ -1,10 +1,11 @@
 import { api } from './api';
-import type { ReportSchedule, ReportFrequency, ScheduledReportKind } from './types';
+import type { ReportCoverage, ReportSchedule, ReportFrequency, ScheduledReportKind } from './types';
 
 export interface ReportScheduleInput {
   name: string;
   kind?: ScheduledReportKind;
   frequency?: ReportFrequency;
+  coverage?: ReportCoverage;
   dayOfPeriod?: number;
   hour?: number;
   isEnabled?: boolean;

@@ -41,21 +41,21 @@ const ToastContext = createContext<ToastApi | undefined>(undefined);
 // green for success, red for error, amber/blue for warning/info.
 const toneStyles: Record<ToastTone, { accent: string; icon: typeof Info; iconColor: string }> = {
   success: {
-    accent: 'border-l-success-500 ring-success-200',
+    accent: 'border-s-success-500 ring-success-200',
     icon: CheckCircle2,
     iconColor: 'text-success-600',
   },
   warning: {
-    accent: 'border-l-warning-500 ring-warning-200',
+    accent: 'border-s-warning-500 ring-warning-200',
     icon: AlertTriangle,
     iconColor: 'text-warning-600',
   },
   danger: {
-    accent: 'border-l-danger-500 ring-danger-200',
+    accent: 'border-s-danger-500 ring-danger-200',
     icon: XCircle,
     iconColor: 'text-danger-600',
   },
-  info: { accent: 'border-l-info-500 ring-info-200', icon: Info, iconColor: 'text-info-600' },
+  info: { accent: 'border-s-info-500 ring-info-200', icon: Info, iconColor: 'text-info-600' },
 };
 
 /**
@@ -111,7 +111,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       <div
-        className="pointer-events-none fixed right-4 top-4 z-[60] flex w-full max-w-sm flex-col gap-2"
+        className="pointer-events-none fixed end-4 top-4 z-[60] flex w-full max-w-sm flex-col gap-2"
         aria-live="polite"
         aria-atomic="false"
       >
@@ -147,7 +147,7 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
-      className={`pointer-events-auto flex items-start gap-2.5 rounded-lg border border-gray-200 border-l-4 bg-white px-4 py-3 text-sm shadow-lg ring-1 ${accent}`}
+      className={`pointer-events-auto flex items-start gap-2.5 rounded-lg border border-gray-200 border-s-4 bg-white px-4 py-3 text-sm shadow-lg ring-1 ${accent}`}
     >
       <Icon size={16} className={`mt-0.5 shrink-0 ${iconColor}`} aria-hidden />
       <div className="flex-1">

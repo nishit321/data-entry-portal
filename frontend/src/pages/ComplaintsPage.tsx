@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MessageSquareWarning } from 'lucide-react';
+import { Download, MessageSquareWarning, Paperclip, Trash2 } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -9,6 +10,7 @@ import {
   Drawer,
   Field,
   FilterField,
+  IconButton,
   ListShell,
   PageHeader,
   Select,
@@ -24,13 +26,14 @@ import { entityPicker } from '../lib/pickers';
 import { getErrorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { COMPLAINT_STATUS_TONE } from '../lib/status';
-import { formatDate, formatDateTime, joinMeta } from '../lib/format';
+import { formatDate, formatDateTime, formatFileSize, joinMeta } from '../lib/format';
 import {
   COMPLAINT_CATEGORIES,
   COMPLAINT_CATEGORY_LABELS,
   COMPLAINT_STATUS_LABELS,
   COMPLAINT_STATUSES,
   type Complaint,
+  type ComplaintAttachment,
   type ComplaintCategory,
   type ComplaintStatus,
 } from '../lib/types';
@@ -185,9 +188,9 @@ export function ComplaintsPage() {
       }}
       filters={
         <>
-          <FilterField label="Status" width="md">
+          <FilterField label={strings.field.status} width="md">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.status}
               options={STATUS_FILTER_OPTIONS}
               onChange={(status) => list.setFilters({ status })}
@@ -201,11 +204,11 @@ export function ComplaintsPage() {
               onChange={(category) => list.setFilters({ category })}
             />
           </FilterField>
-          <FilterField label="Operator" width="lg">
+          <FilterField label={strings.field.operator} width="lg">
             <Combobox
-              aria-label="Filter by operator"
+              aria-label={strings.filter.byOperator}
               emptyLabel="Any operator"
-              placeholder="Search operators…"
+              placeholder={strings.search.operators}
               source={entityPicker}
               value={list.filters.aboutEntityId}
               onChange={(aboutEntityId) => list.setFilters({ aboutEntityId })}
@@ -281,10 +284,12 @@ export function ComplaintsPage() {
               <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600">{open.description}</p>
             </div>
 
+            <CaseFiles complaintId={open.id} canRemove={user?.role === 'ADMIN'} />
+
             {canHandle ? (
               <div className="space-y-3 border-t border-gray-100 pt-4">
                 <h4 className="text-sm font-medium text-gray-900">Record what was done</h4>
-                <Field label="Status" htmlFor="cmp-status">
+                <Field label={strings.field.status} htmlFor="cmp-status">
                   <Select
                     id="cmp-status"
                     value={status}
@@ -299,6 +304,7 @@ export function ComplaintsPage() {
                 >
                   <Textarea
                     id="cmp-note"
+                    placeholder="What was done, and why"
                     rows={3}
                     autoGrow
                     value={note}
@@ -327,5 +333,90 @@ export function ComplaintsPage() {
         )}
       </Drawer>
     </ListShell>
+  );
+}
+
+/**
+ * The files a citizen sent in with their complaint.
+ *
+ * Downloaded, never shown in place. These arrive over the one public write route in the portal,
+ * from somebody who did not sign in, and they are stored without being scanned: rendering one in
+ * the page would be deciding, on the sender's behalf, that it is safe to open.
+ */
+function CaseFiles({ complaintId, canRemove }: { complaintId: string; canRemove: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const filesQuery = useQuery({
+    queryKey: complaintKeys.attachments(complaintId),
+    queryFn: () => complaintsApi.attachments(complaintId),
+  });
+  const files = filesQuery.data ?? [];
+
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => complaintsApi.removeAttachment(complaintId, id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: complaintKeys.attachments(complaintId) });
+      toast.success('File removed from the case.');
+    },
+    onError: (err) => toast.error(getErrorMessage(err, "We couldn't remove that file.")),
+  });
+
+  async function download(file: ComplaintAttachment) {
+    setBusyId(file.id);
+    try {
+      await complaintsApi.downloadAttachment(complaintId, file);
+    } catch (err) {
+      toast.error(getErrorMessage(err, "We couldn't download that file."));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (filesQuery.isLoading || files.length === 0) return null;
+
+  return (
+    <div className="border-t border-gray-100 pt-4">
+      <h4 className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+        <Paperclip size={14} aria-hidden />
+        Sent in with the complaint
+      </h4>
+      <p className="mt-1 text-xs text-gray-500">
+        Sent by the person who filed. Download a file to open it.
+      </p>
+      <ul className="mt-2 divide-y divide-gray-100">
+        {files.map((file) => (
+          <li key={file.id} className="flex items-center gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm text-gray-900">{file.fileName}</p>
+              <p className="text-xs text-gray-500">
+                {joinMeta(formatFileSize(file.sizeBytes), `added ${formatDate(file.createdAt)}`)}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              icon={Download}
+              isLoading={busyId === file.id}
+              onClick={() => void download(file)}
+            >
+              Download
+            </Button>
+            {canRemove && (
+              <IconButton
+                icon={Trash2}
+                label={`Remove ${file.fileName}`}
+                variant="danger"
+                type="button"
+                disabled={removeMutation.isPending}
+                onClick={() => removeMutation.mutate(file.id)}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

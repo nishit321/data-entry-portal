@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Power, Trash2, UserPlus } from 'lucide-react';
+import { Pencil, Power, ShieldOff, Trash2, UserPlus } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -96,6 +97,7 @@ export function UsersPage() {
   const [editing, setEditing] = useState<User | null>(null);
   const [editError, setEditError] = useState('');
   const [pendingDelete, setPendingDelete] = useState<User | null>(null);
+  const [pendingMfaReset, setPendingMfaReset] = useState<User | null>(null);
 
   const list = useListParams({
     defaultSort: 'createdAt',
@@ -255,6 +257,21 @@ export function UsersPage() {
     onError: (err) => toast.error(getErrorMessage(err, "We couldn't delete the user")),
   });
 
+  const mfaResetMutation = useMutation({
+    mutationFn: (id: string) => usersApi.resetMfa(id),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: usersKeys.all });
+      setPendingMfaReset(null);
+      toast.success(
+        result.hadAuthenticatorApp
+          ? 'Their authenticator app has been removed, and they have been told.'
+          : 'There was no authenticator app on that account.',
+      );
+    },
+    onError: (err) =>
+      toast.error(getErrorMessage(err, "We couldn't reset their authenticator app")),
+  });
+
   const rows = listQuery.data?.data ?? [];
 
   // Bulk activate / deactivate (FRONTEND_STANDARDS §3.11). Turning off access for a departed team
@@ -308,7 +325,7 @@ export function UsersPage() {
             </span>
             <span className="font-medium text-gray-900">
               {u.firstName} {u.lastName}
-              {isSelf && <span className="ml-2 text-xs font-normal text-gray-500">(you)</span>}
+              {isSelf && <span className="ms-2 text-xs font-normal text-gray-500">(you)</span>}
             </span>
           </div>
         );
@@ -357,6 +374,12 @@ export function UsersPage() {
               onClick={() => toggleMutation.mutate(u)}
             />
             <IconButton
+              icon={ShieldOff}
+              label="Reset this user's authenticator app"
+              disabled={isSelf}
+              onClick={() => setPendingMfaReset(u)}
+            />
+            <IconButton
               icon={Trash2}
               label="Delete this user"
               variant="danger"
@@ -397,7 +420,7 @@ export function UsersPage() {
       }}
       filters={
         <>
-          <FilterField label="Role" width="lg">
+          <FilterField label={strings.field.role} width="lg">
             <Select
               aria-label="Filter by role"
               value={list.filters.role}
@@ -405,9 +428,9 @@ export function UsersPage() {
               onChange={(role) => list.setFilters({ role })}
             />
           </FilterField>
-          <FilterField label="Status" width="sm">
+          <FilterField label={strings.field.status} width="sm">
             <Select
-              aria-label="Filter by status"
+              aria-label={strings.filter.byStatus}
               value={list.filters.isActive}
               options={STATUS_FILTER_OPTIONS}
               onChange={(isActive) => list.setFilters({ isActive })}
@@ -426,7 +449,7 @@ export function UsersPage() {
         selected.size > 0 ? (
           <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
             <span className="text-sm font-medium text-brand-800">{selected.size} selected</span>
-            <div className="ml-auto flex gap-2">
+            <div className="ms-auto flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => setPendingBulk('activate')}>
                 Activate
               </Button>
@@ -465,7 +488,7 @@ export function UsersPage() {
         emptyAction={
           list.hasActiveFilters ? (
             <Button variant="secondary" onClick={list.clearAll}>
-              Clear filters
+              {strings.action.clearFilters}
             </Button>
           ) : (
             <Button variant="secondary" onClick={openCreate}>
@@ -482,7 +505,7 @@ export function UsersPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField
               htmlFor="firstName"
-              label="First name"
+              label={strings.field.firstName}
               required
               error={form.formState.errors.firstName?.message}
             >
@@ -492,7 +515,7 @@ export function UsersPage() {
             </FormField>
             <FormField
               htmlFor="lastName"
-              label="Last name"
+              label={strings.field.lastName}
               required
               error={form.formState.errors.lastName?.message}
             >
@@ -502,7 +525,7 @@ export function UsersPage() {
             </FormField>
             <FormField
               htmlFor="email"
-              label="Email"
+              label={strings.field.email}
               required
               error={form.formState.errors.email?.message}
             >
@@ -517,7 +540,7 @@ export function UsersPage() {
             </FormField>
             <FormField
               htmlFor="role"
-              label="Role"
+              label={strings.field.role}
               required
               error={form.formState.errors.role?.message}
             >
@@ -538,7 +561,7 @@ export function UsersPage() {
                     options={ROLE_OPTIONS}
                     placeholder="Select a role"
                     invalid={!!form.formState.errors.role}
-                    aria-label="Role"
+                    aria-label={strings.field.role}
                   />
                 )}
               />
@@ -546,7 +569,7 @@ export function UsersPage() {
             {createNeedsEntity && (
               <FormField
                 htmlFor="entityId"
-                label="Entity"
+                label={strings.field.entity}
                 required
                 error={form.formState.errors.entityId?.message}
               >
@@ -560,9 +583,9 @@ export function UsersPage() {
                       onChange={onChange}
                       source={entityPicker}
                       emptyLabel="Select an entity"
-                      placeholder="Search entities…"
+                      placeholder={strings.search.entities}
                       invalid={!!form.formState.errors.entityId}
-                      aria-label="Entity"
+                      aria-label={strings.field.entity}
                     />
                   )}
                 />
@@ -587,7 +610,7 @@ export function UsersPage() {
 
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button type="submit" isLoading={createMutation.isPending}>
               Create user
@@ -607,7 +630,7 @@ export function UsersPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 htmlFor="edit-firstName"
-                label="First name"
+                label={strings.field.firstName}
                 required
                 error={editForm.formState.errors.firstName?.message}
               >
@@ -615,7 +638,7 @@ export function UsersPage() {
               </FormField>
               <FormField
                 htmlFor="edit-lastName"
-                label="Last name"
+                label={strings.field.lastName}
                 required
                 error={editForm.formState.errors.lastName?.message}
               >
@@ -624,14 +647,14 @@ export function UsersPage() {
             </div>
 
             {/* Email is the login identity and is changed through a separate verified flow. */}
-            <FormField htmlFor="edit-email" label="Email">
+            <FormField htmlFor="edit-email" label={strings.field.email}>
               {(field) => <Input {...field} value={editing.email} disabled readOnly />}
             </FormField>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 htmlFor="edit-role"
-                label="Role"
+                label={strings.field.role}
                 required
                 error={editForm.formState.errors.role?.message}
               >
@@ -651,7 +674,7 @@ export function UsersPage() {
                       options={ROLE_OPTIONS}
                       disabled={editingSelf}
                       invalid={!!editForm.formState.errors.role}
-                      aria-label="Role"
+                      aria-label={strings.field.role}
                     />
                   )}
                 />
@@ -659,7 +682,7 @@ export function UsersPage() {
               {editNeedsEntity && (
                 <FormField
                   htmlFor="edit-entityId"
-                  label="Entity"
+                  label={strings.field.entity}
                   required
                   error={editForm.formState.errors.entityId?.message}
                 >
@@ -673,16 +696,16 @@ export function UsersPage() {
                         onChange={onChange}
                         source={entityPicker}
                         emptyLabel="Select an entity"
-                        placeholder="Search entities…"
+                        placeholder={strings.search.entities}
                         disabled={editingSelf}
                         invalid={!!editForm.formState.errors.entityId}
-                        aria-label="Entity"
+                        aria-label={strings.field.entity}
                       />
                     )}
                   />
                 </FormField>
               )}
-              <FormField htmlFor="edit-status" label="Status">
+              <FormField htmlFor="edit-status" label={strings.field.status}>
                 <Controller
                   control={editForm.control}
                   name="isActive"
@@ -693,7 +716,7 @@ export function UsersPage() {
                       onChange={(next) => onChange(next === 'true')}
                       options={STATUS_OPTIONS}
                       disabled={editingSelf}
-                      aria-label="Status"
+                      aria-label={strings.field.status}
                     />
                   )}
                 />
@@ -702,7 +725,7 @@ export function UsersPage() {
 
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
-                Cancel
+                {strings.action.cancel}
               </Button>
               <Button type="submit" isLoading={editMutation.isPending}>
                 Save changes
@@ -750,6 +773,28 @@ export function UsersPage() {
         isLoading={deleteMutation.isPending}
         onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
         onClose={() => setPendingDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingMfaReset}
+        title="Reset their authenticator app"
+        message={
+          pendingMfaReset ? (
+            <>
+              Remove the authenticator app from{' '}
+              <span className="font-medium">{pendingMfaReset.email}</span>? Do this only when they
+              have lost both their phone and their recovery codes. They will sign in with a code
+              sent to their email until they set up a new app, and{' '}
+              <span className="font-medium">they will be told that you did this</span>.
+            </>
+          ) : (
+            ''
+          )
+        }
+        confirmLabel="Reset it"
+        isLoading={mfaResetMutation.isPending}
+        onConfirm={() => pendingMfaReset && mfaResetMutation.mutate(pendingMfaReset.id)}
+        onClose={() => setPendingMfaReset(null)}
       />
     </ListShell>
   );

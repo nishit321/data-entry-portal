@@ -1,0 +1,51 @@
+name: Deploy
+
+# Nothing reaches the server that has not passed CI. The checks are not repeated
+# here; this workflow calls the same suite and releases only if it comes back green.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit or branch to release. Use a previous commit to roll back.'
+        required: false
+        default: main
+
+# Deployments queue rather than cancel each other. A half-finished release that
+# was interrupted mid-migration is worse than one that waited its turn.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Release to production
+    needs: ci
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://data.nca.gov.ss
+    steps:
+      - name: Install the deploy key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Release
+        # The key is restricted on the server to one command, so this argument is
+        # read as the ref to release and nothing else can be run with it.
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "${{ inputs.ref || 'main' }}"
+
+      - name: Confirm the site is answering
+        run: |
+          curl -fsS --retry 5 --retry-delay 5 https://data.nca.gov.ss/api/health

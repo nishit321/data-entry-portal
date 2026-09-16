@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -45,7 +46,8 @@ export function ForgotPasswordPage() {
           to="/login"
           className="inline-flex items-center font-medium text-brand hover:underline"
         >
-          <ArrowLeft size={15} className="mr-1" /> Back to sign in
+          <ArrowLeft size={15} className="me-1" />
+          {strings.action.backToSignIn}
         </Link>
       }
     >
@@ -54,12 +56,17 @@ export function ForgotPasswordPage() {
       ) : (
         <form onSubmit={onSubmit} className="space-y-5">
           {error && <Alert tone="danger">{error}</Alert>}
-          <FormField htmlFor="email" label="Email" error={errors.email?.message} required>
+          <FormField
+            htmlFor="email"
+            label={strings.field.email}
+            error={errors.email?.message}
+            required
+          >
             {(field) => (
               <Input
                 type="email"
                 autoComplete="email"
-                placeholder="you@example.com"
+                placeholder={strings.example.email}
                 {...field}
                 {...register('email')}
               />

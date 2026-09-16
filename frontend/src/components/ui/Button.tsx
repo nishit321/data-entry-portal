@@ -32,7 +32,7 @@ const iconSizes: Record<ButtonSize, number> = { sm: 14, md: 16 };
  * className override (FRONTEND_STANDARDS §3.5). The compact table-row button is `size="sm"`.
  *
  * Pass a leading icon as `icon`, not as a child. Call sites used to write
- * `<Plus size={16} className="mr-1.5" />` inline, which added a margin *on top of* the button's own
+ * `<Plus size={16} className="me-1.5" />` inline, which added a margin *on top of* the button's own
  * `gap`, so the spacing between icon and label differed depending on who wrote the call. The prop
  * owns the size and the spacing.
  *

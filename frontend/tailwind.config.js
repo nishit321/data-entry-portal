@@ -19,6 +19,18 @@ export default {
           800: '#1F3A5F',
           900: '#162a44',
         },
+        // The navy sidebar's own text. Three roles, not a palette: §3.2 allows semantic tokens
+        // and the sidebar had been reaching straight for Tailwind's `slate`, which is the drift
+        // the accessibility audit recorded in §9. The values are unchanged, so this settles the
+        // rule without making a visual decision that belongs to whoever owns the design.
+        sidebar: {
+          // The wordmark and anything that has to read at full strength.
+          fg: '#f1f5f9',
+          // Navigation at rest, before hover lifts it to white.
+          muted: '#cbd5e1',
+          // Section headings and the version line: quiet, and still 5.65:1 on brand-900.
+          dim: '#94a3b8',
+        },
         // Semantic tokens — status and feedback only (FRONTEND_STANDARDS §3.2/§3.3).
         // Values mirror Tailwind's green/amber/red/blue so a redesign stays presentation-only.
         success: {

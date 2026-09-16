@@ -4,9 +4,11 @@ import request from 'supertest';
 import {
   EntityStatus,
   EntityType,
+  ReportCoverage,
   ReportFrequency,
   Role,
   ScheduledReportKind,
+  TemplateStatus,
 } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -120,11 +122,17 @@ describe('Scheduled reports (e2e)', () => {
 
   const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 
+  /*
+   * Coverage defaults to LAST_CLOSED_PERIOD, which is what NCA asked for and what a new schedule
+   * should be. The tests above it are about recipients, permissions and the timetable, none of
+   * which should depend on whether some other suite happens to have a closed period in the shared
+   * database at that moment, so they say LATEST_ACTIVITY unless they are testing coverage itself.
+   */
   const createSchedule = (body: Record<string, unknown>, expected = 201) =>
     request(server)
       .post('/api/v1/report-schedules')
       .set(auth(adminToken))
-      .send(body)
+      .send({ coverage: ReportCoverage.LATEST_ACTIVITY, ...body })
       .expect(expected);
 
   it('requires authentication (401)', async () => {
@@ -227,6 +235,201 @@ describe('Scheduled reports (e2e)', () => {
       .post(`/api/v1/report-schedules/${created.body.id}/send`)
       .set(auth(adminToken))
       .expect(400);
+  });
+
+  describe('what each run covers (NCA, 15 September 2026)', () => {
+    /*
+     * "Report Scheduling: Include date selection functionality." Asked back, and answered: each
+     * run should send the period that has just closed, rather than a date fixed once when the
+     * schedule was made.
+     *
+     * Which makes the window a thing decided at send time, and that is what these tests hold. The
+     * failure worth guarding is not a wrong date on a screen: it is a levy statement that goes out
+     * every quarter, covers whatever period happens to be latest, and says nothing about which.
+     */
+    const coverageNames = ['E2E coverage closed', 'E2E coverage latest'];
+    const coverageLicence = 'E2E/REP/COV';
+    let templateId: string;
+    let olderPeriodId: string;
+    let newerPeriodId: string;
+
+    beforeAll(async () => {
+      await prisma.reportSchedule.deleteMany({ where: { name: { in: coverageNames } } });
+      await prisma.reportingPeriod.deleteMany({ where: { template: { name: coverageLicence } } });
+      await prisma.reportingTemplate.deleteMany({ where: { name: coverageLicence } });
+
+      const template = await prisma.reportingTemplate.create({
+        data: {
+          name: coverageLicence,
+          version: 1,
+          status: TemplateStatus.PUBLISHED,
+          publishedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      templateId = template.id;
+
+      /*
+       * Two closed periods, and the older one closed last.
+       *
+       * The pair that tells the two plausible readings apart. "The period that has just closed"
+       * means the most recent period, not the one somebody most recently got round to closing —
+       * and a backlog cleared out of order is exactly how those two come apart. Dated far enough
+       * ahead that no other suite's period outranks them in the shared database.
+       */
+      const older = await prisma.reportingPeriod.create({
+        data: {
+          templateId,
+          frequency: 'QUARTERLY',
+          label: 'E2E 2098 Q1',
+          periodStart: new Date('2098-01-01'),
+          periodEnd: new Date('2098-03-31'),
+          dueDate: new Date('2098-04-15'),
+          status: 'CLOSED',
+          closedAt: new Date('2098-12-01'),
+        },
+        select: { id: true },
+      });
+      olderPeriodId = older.id;
+
+      const newer = await prisma.reportingPeriod.create({
+        data: {
+          templateId,
+          frequency: 'QUARTERLY',
+          label: 'E2E 2098 Q2',
+          periodStart: new Date('2098-04-01'),
+          periodEnd: new Date('2098-06-30'),
+          dueDate: new Date('2098-07-15'),
+          status: 'CLOSED',
+          closedAt: new Date('2098-08-01'),
+        },
+        select: { id: true },
+      });
+      newerPeriodId = newer.id;
+    });
+
+    afterAll(async () => {
+      await prisma.reportSchedule.deleteMany({ where: { name: { in: coverageNames } } });
+      await prisma.reportingPeriod.deleteMany({ where: { templateId } });
+      await prisma.reportingTemplate.deleteMany({ where: { id: templateId } });
+    });
+
+    it('defaults a new schedule to the period that has just closed', async () => {
+      // The default matters more than it looks. Somebody setting up a monthly levy statement and
+      // not touching this field should get a statement for a finished period, not one that
+      // restates itself every month.
+      const created = await request(server)
+        .post('/api/v1/report-schedules')
+        .set(auth(adminToken))
+        .send({
+          name: coverageNames[0],
+          kind: ScheduledReportKind.LEVY_WORKBOOK,
+          frequency: ReportFrequency.MONTHLY,
+          dayOfPeriod: 1,
+          recipientIds: [adminId],
+        })
+        .expect(201);
+      expect(created.body.coverage).toBe(ReportCoverage.LAST_CLOSED_PERIOD);
+    });
+
+    it('sends the most recent closed period, not the most recently closed one', async () => {
+      const list = await request(server)
+        .get('/api/v1/report-schedules')
+        .set(auth(adminToken))
+        .expect(200);
+      const schedule = list.body.find((s: { name: string }) => s.name === coverageNames[0]);
+
+      await request(server)
+        .post(`/api/v1/report-schedules/${schedule.id}/send`)
+        .set(auth(adminToken))
+        .expect(201);
+
+      // The audit row is where the window is recorded, and it is the only place a reader can later
+      // check which quarter a statement in their inbox was built from.
+      const entry = await prisma.auditLog.findFirst({
+        where: {
+          entityType: 'ReportSchedule',
+          entityId: schedule.id,
+          action: 'REPORT_SCHEDULE_SENT',
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { metadata: true },
+      });
+      const metadata = entry!.metadata as { period?: string; coverage?: string };
+      expect(metadata.coverage).toBe(ReportCoverage.LAST_CLOSED_PERIOD);
+      // Q2 ends after Q1, even though Q1 was closed months later.
+      expect(metadata.period).toBe('E2E 2098 Q2');
+      expect(newerPeriodId).not.toBe(olderPeriodId);
+    });
+
+    it('fixes no period when the report is about how things stand now', async () => {
+      const created = await request(server)
+        .post('/api/v1/report-schedules')
+        .set(auth(adminToken))
+        .send({
+          name: coverageNames[1],
+          kind: ScheduledReportKind.COMPLIANCE_WORKBOOK,
+          frequency: ReportFrequency.WEEKLY,
+          dayOfPeriod: 1,
+          coverage: ReportCoverage.LATEST_ACTIVITY,
+          recipientIds: [adminId],
+        })
+        .expect(201);
+
+      await request(server)
+        .post(`/api/v1/report-schedules/${created.body.id}/send`)
+        .set(auth(adminToken))
+        .expect(201);
+
+      const entry = await prisma.auditLog.findFirst({
+        where: {
+          entityType: 'ReportSchedule',
+          entityId: created.body.id,
+          action: 'REPORT_SCHEDULE_SENT',
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { metadata: true },
+      });
+      const metadata = entry!.metadata as { period?: string };
+      // A compliance report chases the operators who have not filed for the period that is open,
+      // so pinning it to a closed one would chase nobody.
+      expect(metadata.period).toBe('the latest figures');
+    });
+
+    it('refuses to send rather than quietly covering a different window', async () => {
+      /*
+       * With nothing closed, a report set up to cover the period that has just closed has no
+       * window. Falling back to "the latest" would produce a file that looks right and is not, and
+       * nobody would find out. Failing puts it on the schedule's own error line instead.
+       */
+      await prisma.reportingPeriod.updateMany({
+        where: { status: 'CLOSED' },
+        data: { status: 'OPEN' },
+      });
+      try {
+        const list = await request(server)
+          .get('/api/v1/report-schedules')
+          .set(auth(adminToken))
+          .expect(200);
+        const schedule = list.body.find((s: { name: string }) => s.name === coverageNames[0]);
+
+        const res = await request(server)
+          .post(`/api/v1/report-schedules/${schedule.id}/send`)
+          .set(auth(adminToken))
+          .expect(400);
+        expect(res.body.message).toMatch(/no period has been closed/i);
+      } finally {
+        // Put the fixture back: other suites read closed periods from this database.
+        await prisma.reportingPeriod.update({
+          where: { id: olderPeriodId },
+          data: { status: 'CLOSED' },
+        });
+        await prisma.reportingPeriod.update({
+          where: { id: newerPeriodId },
+          data: { status: 'CLOSED' },
+        });
+      }
+    });
   });
 
   it('removes a schedule and stops listing it', async () => {

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -60,7 +61,7 @@ export function SignupPage() {
         <div className="grid grid-cols-2 gap-3">
           <FormField
             htmlFor="firstName"
-            label="First name"
+            label={strings.field.firstName}
             error={errors.firstName?.message}
             required
           >
@@ -73,7 +74,12 @@ export function SignupPage() {
               />
             )}
           </FormField>
-          <FormField htmlFor="lastName" label="Last name" error={errors.lastName?.message} required>
+          <FormField
+            htmlFor="lastName"
+            label={strings.field.lastName}
+            error={errors.lastName?.message}
+            required
+          >
             {(field) => (
               <Input
                 autoComplete="family-name"
@@ -84,12 +90,17 @@ export function SignupPage() {
             )}
           </FormField>
         </div>
-        <FormField htmlFor="email" label="Email" error={errors.email?.message} required>
+        <FormField
+          htmlFor="email"
+          label={strings.field.email}
+          error={errors.email?.message}
+          required
+        >
           {(field) => (
             <Input
               type="email"
               autoComplete="email"
-              placeholder="you@example.com"
+              placeholder={strings.example.email}
               {...field}
               {...register('email')}
             />
@@ -106,7 +117,7 @@ export function SignupPage() {
           )}
         </FormField>
         <Button type="submit" className="w-full" isLoading={isSubmitting}>
-          Create account <ArrowRight size={16} className="ml-1.5" />
+          Create account <ArrowRight size={16} className="ms-1.5" />
         </Button>
       </form>
     </AuthLayout>

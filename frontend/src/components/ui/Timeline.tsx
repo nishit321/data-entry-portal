@@ -30,7 +30,7 @@ export function Timeline({ events }: { events: TimelineEvent[] }) {
   if (events.length === 0) return null;
 
   return (
-    <ol className="relative space-y-5 border-l border-gray-200 pl-5">
+    <ol className="relative space-y-5 border-s border-gray-200 ps-5">
       {events.map((event) => (
         <li key={event.id} className="relative">
           <span

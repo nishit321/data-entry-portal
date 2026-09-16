@@ -199,14 +199,14 @@ export function Combobox({
         aria-describedby={ariaDescribedBy}
         onClick={() => !disabled && setOpen((o) => !o)}
         onKeyDown={onKeyDown}
-        className={`flex w-full items-center justify-between gap-2 rounded-md border bg-white px-3 py-2 text-left text-sm shadow-sm transition focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500 ${
+        className={`flex w-full items-center justify-between gap-2 rounded-md border bg-white px-3 py-2 text-start text-sm shadow-sm transition focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500 ${
           invalid
             ? 'border-danger-500 focus-visible:border-danger-500 focus-visible:ring-danger-500/30'
             : 'border-gray-300 focus-visible:border-brand focus-visible:ring-brand/30'
         }`}
       >
         <span
-          className={`truncate ${clearable ? 'pr-6' : ''} ${
+          className={`truncate ${clearable ? 'pe-6' : ''} ${
             selected ? 'text-gray-900' : 'text-gray-500'
           }`}
         >
@@ -227,7 +227,7 @@ export function Combobox({
           type="button"
           aria-label={ariaLabel ? `Clear ${ariaLabel}` : 'Clear this filter'}
           onClick={() => commit(null)}
-          className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="absolute end-8 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <X size={14} aria-hidden />
         </button>

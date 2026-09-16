@@ -74,7 +74,7 @@ export function Sidebar({
         // (§6). It must be scoped to the drawer breakpoint — on desktop this same element is
         // permanent chrome, and marking it inert there would make the whole navigation dead.
         {...(isDrawer && !open ? { inert: '' } : {})}
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-brand-900 text-slate-100 transition-[transform,visibility,width] duration-200 lg:static lg:visible lg:translate-x-0 ${width} ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-brand-900 text-sidebar-fg transition-[transform,visibility,width] duration-200 lg:static lg:visible lg:translate-x-0 ${width} ${
           open ? 'visible translate-x-0' : 'invisible -translate-x-full'
         }`}
       >
@@ -90,12 +90,12 @@ export function Sidebar({
             </div>
             <div className={`leading-tight ${collapsed ? 'lg:hidden' : ''}`}>
               <div className="text-sm font-semibold">NCA Portal</div>
-              <div className="text-[11px] text-slate-400">Data Collection</div>
+              <div className="text-[11px] text-sidebar-dim">Data Collection</div>
             </div>
           </div>
           <button
             type="button"
-            className="rounded-md p-1 text-slate-300 hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 lg:hidden"
+            className="rounded-md p-1 text-sidebar-muted hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 lg:hidden"
             onClick={onClose}
             aria-label="Close menu"
           >
@@ -108,7 +108,7 @@ export function Sidebar({
           {sections.map((section, index) => (
             <div key={section.id} className={index > 0 ? 'mt-5' : ''}>
               <div
-                className={`px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 ${
+                className={`px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-dim ${
                   collapsed ? 'lg:sr-only' : ''
                 }`}
               >
@@ -136,12 +136,12 @@ export function Sidebar({
             type="button"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? 'Expand the menu' : 'Collapse the menu'}
-            className="hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 lg:flex"
+            className="hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-muted transition-colors hover:bg-white/5 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 lg:flex"
           >
             {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             <span className={collapsed ? 'lg:hidden' : ''}>Collapse</span>
           </button>
-          <p className={`px-3 pt-2 text-[11px] text-slate-400 ${collapsed ? 'lg:hidden' : ''}`}>
+          <p className={`px-3 pt-2 text-[11px] text-sidebar-dim ${collapsed ? 'lg:hidden' : ''}`}>
             NCA Data Collection Portal
             <br />
             {APP_VERSION}
@@ -173,7 +173,7 @@ function NavItemLink({
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
           collapsed ? 'lg:justify-center lg:px-0' : ''
-        } ${isActive ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`
+        } ${isActive ? 'bg-brand-600 text-white' : 'text-sidebar-muted hover:bg-white/5 hover:text-white'}`
       }
     >
       <Icon size={18} className="shrink-0" aria-hidden />

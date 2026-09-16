@@ -320,3 +320,240 @@ describe('EnforcementService sweep resilience', () => {
     expect(result.casesOpened).toBe(1);
   });
 });
+
+/**
+ * The statutory 30-day remedy notice (NCA, 3 September 2026).
+ *
+ * Their answer settled a question with two plausible readings and very different sums, so it is
+ * written out here in full rather than paraphrased into a test name:
+ *
+ *   "From the original late date (after the grace window), but only assessed once the 30-day
+ *    remedy period lapses unremedied. So nothing is payable during the 30 days, but a defaulter
+ *    doesn't get a free month either. If they cure within 30 days, only the Tier 1 late charge
+ *    stands."
+ *
+ * Three separate claims, each of which a reasonable implementation could get wrong on its own:
+ * where the clock starts for *calculating*, when the figure becomes *payable*, and what survives
+ * when the operator does what the notice asked.
+ */
+describe('EnforcementService remedy notice', () => {
+  /** A case as the accrual reads it, with the remedy clock wherever the test needs it. */
+  const openCase = (over: Record<string, unknown> = {}) => ({
+    id: 'c1',
+    entityId: 'ent-1',
+    periodId: 'p1',
+    penaltyAmount: 0,
+    penaltyDays: 0,
+    defaultStartedAt: new Date(Date.now() - 40 * DAY),
+    remedyNoticeAt: new Date(Date.now() - 40 * DAY),
+    remedyDueAt: new Date(Date.now() - 10 * DAY),
+    period: { label: '2026 Q1' },
+    penaltyRule: RULE,
+    ...over,
+  });
+
+  const accrueWith = (over: Record<string, unknown> = {}, filings: unknown[] = []) =>
+    buildService({
+      enforcementCase: {
+        findMany: jest.fn().mockResolvedValue([openCase(over)]),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      submission: { findMany: jest.fn().mockResolvedValue(filings) },
+    });
+
+  it('issues the notice the moment the case is opened, with thirty days on it', async () => {
+    const { service, prisma } = buildService({
+      schedule: { ruleFor: jest.fn().mockResolvedValue(RULE) },
+    });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    const data = (prisma.enforcementCase.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.remedyNoticeAt).toBeInstanceOf(Date);
+    const days = (data.remedyDueAt.getTime() - data.remedyNoticeAt.getTime()) / DAY;
+    expect(days).toBe(30);
+  });
+
+  it('does not make the penalty payable on the day the case opens', async () => {
+    /*
+     * The Act's protection, and the easiest thing to lose. A case that arrives already assessed has
+     * skipped the notice entirely — the operator is being charged before being told.
+     */
+    const { service, prisma } = buildService({
+      schedule: { ruleFor: jest.fn().mockResolvedValue(RULE) },
+    });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    const data = (prisma.enforcementCase.create as jest.Mock).mock.calls[0][0].data;
+    expect(data.penaltyAssessedAt).toBeNull();
+    // The figure is still worked out and shown. Only its being *due* waits.
+    expect(data.penaltyAmount).not.toBeNull();
+  });
+
+  it('keeps the figure moving during the thirty days without making it payable', async () => {
+    // "Nothing is payable during the 30 days, but a defaulter doesn't get a free month either."
+    const { service, prisma } = accrueWith({
+      remedyNoticeAt: new Date(Date.now() - 5 * DAY),
+      remedyDueAt: new Date(Date.now() + 25 * DAY),
+      defaultStartedAt: new Date(Date.now() - 5 * DAY),
+    });
+
+    await service.accrue(null, CTX);
+    const data = (prisma.enforcementCase.update as jest.Mock).mock.calls[0][0].data;
+    // The schedule's fixed charge plus five days of it — the figure is worked out in full.
+    expect(Number(data.penaltyAmount)).toBe(50_000 + 5 * 5_000);
+    expect(data.penaltyAssessedAt).toBeNull();
+  });
+
+  it('makes it payable once the thirty days lapse unremedied', async () => {
+    const { service, prisma } = accrueWith();
+
+    await service.accrue(null, CTX);
+    const data = (prisma.enforcementCase.update as jest.Mock).mock.calls[0][0].data;
+    expect(data.penaltyAssessedAt).toBeInstanceOf(Date);
+  });
+
+  it('counts from the day the return was late, not from the notice', async () => {
+    /*
+     * The sharpest of the three claims, and the reason we asked rather than assumed. Counting from
+     * the notice would hand a defaulter a free month; NCA ruled that out in the same sentence they
+     * granted the thirty days.
+     *
+     * Forty days late, charged for forty — not for the ten since the notice expired.
+     */
+    const { service, prisma } = accrueWith();
+
+    await service.accrue(null, CTX);
+    const data = (prisma.enforcementCase.update as jest.Mock).mock.calls[0][0].data;
+    expect(data.penaltyDays).toBe(40);
+  });
+
+  it('treats a case from before the notice existed as past its remedy period', async () => {
+    // Otherwise every case opened before this was built would freeze, unpayable for ever, with
+    // nothing on screen to say why.
+    const { service, prisma } = accrueWith({ remedyNoticeAt: null, remedyDueAt: null });
+
+    await service.accrue(null, CTX);
+    const data = (prisma.enforcementCase.update as jest.Mock).mock.calls[0][0].data;
+    expect(data.penaltyAssessedAt).toBeInstanceOf(Date);
+  });
+});
+
+/**
+ * Where "audited annual revenue" comes from (NCA, 3 September 2026).
+ *
+ * Tiers 2 and 3 are a share of it, so the figure decides what an operator owes — and it is not one
+ * the portal calculates. `VALIDATION_SPEC` §4.1 settles the source: revenue is **entered on the
+ * annual return from audited accounts**, deliberately not summed from the four quarters. Three
+ * conditions follow from that, and each one changes the amount if it is dropped, which is why they
+ * are tested separately rather than as one happy path.
+ *
+ * The lookup existed before any of these did. It was written, wired into both pricing paths, and
+ * measured by nothing.
+ */
+describe('EnforcementService audited annual revenue', () => {
+  const PERCENT_RULE = {
+    id: 'rule-pct',
+    fixedAmount: 0,
+    dailyAmount: 0,
+    maxAmount: null,
+    minAmount: 50_000_000,
+    percentOfRevenue: 0.2,
+  };
+
+  /** A sweep whose schedule line is a share of revenue, over whatever annual return is supplied. */
+  const sweepWith = (annualReturn: unknown) =>
+    buildService({
+      schedule: { ruleFor: jest.fn().mockResolvedValue(PERCENT_RULE) },
+      submission: {
+        findMany: jest.fn().mockResolvedValue([{ entityId: 'ent-filed' }]),
+        findFirst: jest.fn().mockResolvedValue(annualReturn),
+      },
+    });
+
+  const priced = (prisma: { enforcementCase: { create: jest.Mock } }) =>
+    prisma.enforcementCase.create.mock.calls[0][0].data;
+
+  /*
+   * The mock reached through a cast.
+   *
+   * `buildService` infers `prisma` from its own literal, so an override that adds a method is
+   * invisible to the type — the override is real at run time and the shape is not. Casting here
+   * says that plainly, rather than widening the harness for every other test that does not need it.
+   */
+  const annualLookup = (prisma: unknown) =>
+    (prisma as { submission: { findFirst: jest.Mock } }).submission.findFirst;
+
+  it('prices from the revenue on the approved annual return', async () => {
+    // 0.2% of SSP 40bn is SSP 80m, well clear of the floor.
+    const { service, prisma } = sweepWith({
+      values: [{ valueText: '25000000000' }, { valueText: '15000000000' }],
+    });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    expect(Number(priced(prisma).penaltyAmount)).toBe(80_000_000);
+  });
+
+  it('asks only for an annual return that has been approved and not superseded', async () => {
+    /*
+     * Each of these is a different amount if it is dropped. A quarter's revenue is not the year's;
+     * a draft lets an operator move what it owes by editing a return; and a superseded one counted
+     * alongside its replacement doubles the year.
+     */
+    const { service, prisma } = sweepWith({ values: [{ valueText: '40000000000' }] });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    const where = annualLookup(prisma).mock.calls[0][0].where;
+    expect(where.status).toBe('APPROVED');
+    expect(where.supersededBy).toBeNull();
+    expect(where.period.frequency).toBe('ANNUAL');
+  });
+
+  it('counts only the fields the Authority marked as the levy basis', async () => {
+    // The same marker the levy is charged on. Two markers for "this is revenue" would drift, and
+    // the first anybody noticed would be a penalty that disagreed with the levy.
+    const { service, prisma } = sweepWith({ values: [{ valueText: '40000000000' }] });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    const select = annualLookup(prisma).mock.calls[0][0].select;
+    expect(select.values.where.field.isLevyBasis).toBe(true);
+    // And a figure the operator said it could not supply is not a figure.
+    expect(select.values.where.isUnavailable).toBe(false);
+  });
+
+  it('states no amount at all when the annual return does not exist yet', async () => {
+    /*
+     * The ordinary case. A breach early in the year is priced on that year's revenue, which
+     * arrives with the annual return months later. Zero would read as "nothing owed"; a guess
+     * would be worse.
+     */
+    const { service, prisma } = sweepWith(null);
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    expect(Number(priced(prisma).penaltyAmount)).toBe(0);
+    expect(priced(prisma).penaltyAssessedAt).toBeNull();
+  });
+
+  it('lifts a small operator to the floor', async () => {
+    // 0.2% of SSP 5bn is SSP 10m, a fifth of the minimum. A penalty that scales to nothing for a
+    // small operator is not a deterrent.
+    const { service, prisma } = sweepWith({ values: [{ valueText: '5000000000' }] });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    expect(Number(priced(prisma).penaltyAmount)).toBe(50_000_000);
+  });
+
+  it('does not go looking for revenue when the line is charged by the day', async () => {
+    // Tier 1 has nothing to do with the operator's size, and the nightly accrual runs over an
+    // unbounded list of cases. A lookup per case that no line reads is a query for nothing.
+    const { service, prisma } = buildService({
+      schedule: { ruleFor: jest.fn().mockResolvedValue(RULE) },
+      submission: {
+        findMany: jest.fn().mockResolvedValue([{ entityId: 'ent-filed' }]),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    });
+    await service.sweepPeriod('p1', admin.id, CTX);
+
+    expect(annualLookup(prisma)).not.toHaveBeenCalled();
+  });
+});

@@ -9,10 +9,24 @@ import { formatDateTime } from '../lib/format';
 /** How often the page re-checks by itself, so a screen left open stays honest. */
 const REFRESH_MS = 30_000;
 
+/**
+ * What each overnight job is called, and what it does.
+ *
+ * Both maps are `Record<JobStatus['name'], …>`, so adding a job to the server and not to this file
+ * fails the build rather than shipping a row with a blank title and a button that does something
+ * nobody can name. Four of these were missing for a while and the screen showed exactly that.
+ *
+ * The wording is for somebody deciding whether to press "Run now" at nine in the morning, so each
+ * line says what will happen to operators rather than what the code does.
+ */
 const JOB_LABELS: Record<JobStatus['name'], string> = {
   'compliance-sweep': 'Compliance check',
   'document-expiry': 'Document expiry check',
   'notification-retry': 'Email retry',
+  'penalty-accrual': 'Penalty update',
+  'scheduled-reports': 'Scheduled reports',
+  'nonce-sweep': 'Machine request clean-up',
+  'network-feeds': 'Operator data feeds',
 };
 
 const JOB_DESCRIPTIONS: Record<JobStatus['name'], string> = {
@@ -20,6 +34,12 @@ const JOB_DESCRIPTIONS: Record<JobStatus['name'], string> = {
     'Opens a case against any operator that did not file once the grace period has ended.',
   'document-expiry': 'Alerts operators whose licence or certificate is close to expiring.',
   'notification-retry': 'Sends again any email that failed to go out.',
+  'penalty-accrual':
+    'Brings each open case up to date, and closes the ones whose return has arrived.',
+  'scheduled-reports': 'Emails the reports that are due today to the people on their lists.',
+  'nonce-sweep':
+    'Clears the spent one-time values from machine requests. Housekeeping: nothing an operator sees.',
+  'network-feeds': 'Collects data from operators who have agreed to send it automatically.',
 };
 
 /**

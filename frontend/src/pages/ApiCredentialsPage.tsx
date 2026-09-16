@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, KeyRound, Plus, RefreshCw, ShieldOff, X } from 'lucide-react';
 import {
@@ -197,7 +198,7 @@ export function ApiCredentialsPage() {
                       {joinMeta(
                         client.allowedCidrs.length > 0
                           ? `Only from ${client.allowedCidrs.join(', ')}`
-                          : 'Usable from any address',
+                          : 'Usable from any IP address',
                         client.certFingerprint
                           ? 'bound to a client certificate'
                           : 'no client certificate required',
@@ -229,7 +230,7 @@ export function ApiCredentialsPage() {
 
                 {client.allowedCidrs.length === 0 && client.status === 'ACTIVE' && (
                   <p className="mt-3 text-xs text-warning-700">
-                    This credential can be used from anywhere. If you know the addresses your
+                    This credential can be used from any IP address. If you know the addresses your
                     systems call from, adding them here means a leaked secret is not enough on its
                     own.
                   </p>
@@ -249,6 +250,7 @@ export function ApiCredentialsPage() {
           >
             <Input
               id="cred-name"
+              placeholder="e.g. Billing system"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
@@ -268,12 +270,13 @@ export function ApiCredentialsPage() {
           </fieldset>
 
           <Field
-            label="Addresses it may be used from"
+            label="IP addresses it may be used from"
             htmlFor="cred-cidrs"
-            hint="One per line, e.g. 203.0.113.10 or 203.0.113.0/24. Leave blank to allow any address."
+            hint="One per line. A single address like 203.0.113.10, or a range in CIDR form like 203.0.113.0/24. Leave blank to allow any IP address."
           >
             <Input
               id="cred-cidrs"
+              placeholder="e.g. 203.0.113.0/24"
               value={form.allowedCidrs}
               onChange={(e) => setForm({ ...form, allowedCidrs: e.target.value })}
             />
@@ -286,6 +289,7 @@ export function ApiCredentialsPage() {
           >
             <Input
               id="cred-cert"
+              placeholder="SHA-256 fingerprint, hex"
               value={form.certFingerprint}
               onChange={(e) => setForm({ ...form, certFingerprint: e.target.value })}
             />
@@ -294,6 +298,7 @@ export function ApiCredentialsPage() {
           <Field label="Requests a minute" htmlFor="cred-rate">
             <Input
               id="cred-rate"
+              placeholder="e.g. 60"
               type="number"
               min="1"
               value={form.rateLimitPerMinute}
@@ -303,7 +308,7 @@ export function ApiCredentialsPage() {
 
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={create.isPending}

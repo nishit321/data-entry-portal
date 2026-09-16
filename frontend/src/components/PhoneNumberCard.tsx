@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Phone, ShieldCheck } from 'lucide-react';
 import { authApi } from '../lib/auth.api';
@@ -125,7 +126,7 @@ export function PhoneNumberCard({ user, onChanged }: { user: User; onChanged: ()
                 id="phone-code"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                placeholder="123456"
+                placeholder={strings.example.oneTimeCode}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
               />

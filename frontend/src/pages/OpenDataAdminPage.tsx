@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Eye, EyeOff, Globe, Plus, Trash2 } from 'lucide-react';
 import {
@@ -257,6 +258,7 @@ export function OpenDataAdminPage() {
           >
             <Input
               id="pub-label"
+              placeholder="What the public sees, e.g. People connected"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
             />
@@ -264,6 +266,7 @@ export function OpenDataAdminPage() {
           <Field label="Unit" htmlFor="pub-unit" hint="Optional, e.g. subscribers or minutes.">
             <Input
               id="pub-unit"
+              placeholder="e.g. subscribers"
               value={form.unit}
               onChange={(e) => setForm({ ...form, unit: e.target.value })}
             />
@@ -275,6 +278,7 @@ export function OpenDataAdminPage() {
           >
             <Textarea
               id="pub-desc"
+              placeholder="One sentence, for a reader outside the Authority"
               rows={2}
               autoGrow
               value={form.description}
@@ -283,7 +287,7 @@ export function OpenDataAdminPage() {
           </Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={create.isPending}

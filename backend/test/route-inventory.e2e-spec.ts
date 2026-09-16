@@ -36,11 +36,22 @@ const PUBLIC: Record<string, string> = {
     'the citizen-facing portal (Q4). Aggregated and disclosure-controlled.',
   'GET /api/v1/public/indicators': 'the same: published sector figures, never operator-level.',
   'GET /api/v1/public/complaints-summary': 'the same: counts, not complainants.',
+  'GET /api/v1/public/periods':
+    'the closed periods the public filter offers. A label and a due date, neither confidential ' +
+    'and neither saying anything about who filed.',
+  'GET /api/v1/public/indicators.xlsx':
+    'the same figures as a spreadsheet. Built from what the indicators endpoint returned, so a ' +
+    'download carries what the page shows and withholds what the page withholds.',
+  'GET /api/v1/public/indicators.pdf': 'the same again, as a document.',
 
   'POST /api/v1/complaints':
     'a citizen files without an account. That is the point of the channel.',
   'POST /api/v1/complaints/track':
     'a citizen checks their own complaint by reference. Returns only that one case.',
+  'POST /api/v1/complaints/attachments':
+    'the same citizen attaches evidence to the complaint they just filed. Public because they ' +
+    'have no account; the reference and tracking code issued at filing are checked before a byte ' +
+    'is written, and there is no matching public route to read a file back.',
 };
 
 /** Authenticated, but open to every role. Each of these was looked at. */
@@ -55,6 +66,18 @@ const ANY_SIGNED_IN: Record<string, string> = {
     "spends the Authority's SMS balance and rings somebody's handset.",
   'POST /api/v1/auth/phone/verify': "confirms the caller's own number against a code sent to it.",
   'DELETE /api/v1/auth/phone': "removes the caller's own number.",
+
+  'GET /api/v1/auth/totp':
+    "whether an authenticator app is set up on the caller's own account, and whether the server " +
+    'can offer one at all.',
+  'POST /api/v1/auth/totp': "mints a secret for the caller's own account. Switches nothing on.",
+  'POST /api/v1/auth/totp/confirm':
+    "switches the caller's own second factor on, against a code from their app.",
+  'POST /api/v1/auth/totp/recovery-codes':
+    "replaces the caller's own recovery codes. A current code is required.",
+  'DELETE /api/v1/auth/totp':
+    "switches the caller's own second factor off. A current code is required even though they are " +
+    'signed in, so a session left open cannot strip it.',
 
   'GET /api/v1/notifications': "the caller's own notifications; the query is scoped to them.",
   'GET /api/v1/notifications/unread-count': 'a count of the same.',

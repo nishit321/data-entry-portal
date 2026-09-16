@@ -24,6 +24,10 @@ export interface PenaltyTerms {
   dailyAmount: number;
   /** Ceiling on the total, or null when the schedule sets none. */
   maxAmount: number | null;
+  /** Floor on the total, for a line stated as "a percentage, minimum X". */
+  minAmount?: number | null;
+  /** Percentage of audited annual revenue, for the tiers stated that way. */
+  percentOfRevenue?: number | null;
 }
 
 export interface Assessment {
@@ -32,6 +36,16 @@ export interface Assessment {
   days: number;
   /** True when the cap bit, so the case can say so rather than showing an unexplained round figure. */
   capped: boolean;
+  /** True when the floor lifted the figure, for the same reason. */
+  floored: boolean;
+  /**
+   * Set when the line is a percentage of revenue and that revenue is not known yet.
+   *
+   * A QoS breach in Q1 is priced on the year's audited revenue, which arrives with the annual
+   * return months later. The honest answer in between is not zero and not a guess — it is that the
+   * amount cannot be stated, and why.
+   */
+  pending?: 'awaiting-audited-revenue';
 }
 
 /** Whole days between two instants, never negative. */
@@ -54,14 +68,62 @@ export function assessPenalty(
   startedAt: Date,
   endedAt: Date | null,
   asOf: Date,
+  /**
+   * The operator's audited annual revenue in SSP, when it is known.
+   *
+   * Only consulted by a percentage line. `null` means the annual return has not been filed and
+   * approved yet, which is the ordinary case for a contravention early in the year.
+   */
+  auditedAnnualRevenue: number | null = null,
 ): Assessment {
   const until = endedAt !== null && endedAt < asOf ? endedAt : asOf;
   const days = daysBetween(startedAt, until);
 
-  const raw = terms.fixedAmount + terms.dailyAmount * days;
-  const capped = terms.maxAmount !== null && raw > terms.maxAmount;
-  const amount = capped ? terms.maxAmount! : raw;
+  /*
+   * A percentage line and a per-day line are different instruments, not two halves of one sum.
+   *
+   * Tier 1 runs on time: a fixed charge plus so much a day. Tiers 2 and 3 run on size — a share of
+   * what the operator earned that year, with a floor so that a small operator's breach is not
+   * priced at almost nothing. Adding the two together would invent a penalty the Act does not
+   * describe.
+   */
+  /*
+   * A percentage that is not a finite number is not a percentage.
+   *
+   * Belt and braces after a NaN got this far once, from a caller that had not selected the column.
+   * A wrong figure stated as a real one is the worst outcome available here, so the arithmetic
+   * declines to treat rubbish as an instruction.
+   */
+  const raw = terms.percentOfRevenue;
+  const percent = raw == null || !Number.isFinite(raw) ? null : raw;
+  if (percent !== null) {
+    if (auditedAnnualRevenue === null) {
+      return {
+        amount: 0,
+        days,
+        capped: false,
+        floored: false,
+        pending: 'awaiting-audited-revenue',
+      };
+    }
+    return { ...bound(terms, (auditedAnnualRevenue * percent) / 100), days };
+  }
 
+  return { ...bound(terms, terms.fixedAmount + terms.dailyAmount * days), days };
+}
+
+/**
+ * Put a raw figure inside the schedule's floor and cap, and say which of them moved it.
+ *
+ * A case that shows a round number with no explanation invites the argument that it was made up.
+ * Saying "this is the minimum" or "this is the maximum" is the difference between a figure an
+ * operator can check and one they can only dispute.
+ */
+function bound(terms: PenaltyTerms, raw: number): Omit<Assessment, 'days'> {
+  const floored = terms.minAmount != null && raw < terms.minAmount;
+  const withFloor = floored ? terms.minAmount! : raw;
+  const capped = terms.maxAmount !== null && withFloor > terms.maxAmount;
+  const amount = capped ? terms.maxAmount! : withFloor;
   // Two decimals, matching how every other monetary figure in the portal is stored and shown.
-  return { amount: Math.round(amount * 100) / 100, days, capped };
+  return { amount: Math.round(amount * 100) / 100, capped, floored };
 }

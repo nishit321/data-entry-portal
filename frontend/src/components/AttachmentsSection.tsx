@@ -135,7 +135,7 @@ export function AttachmentsSection({ submissionId, editable, initial }: Attachme
               Add a file
             </Button>
             {selectedName && uploadMutation.isPending && (
-              <span className="ml-2 text-sm text-gray-500">{selectedName}</span>
+              <span className="ms-2 text-sm text-gray-500">{selectedName}</span>
             )}
           </div>
         </div>

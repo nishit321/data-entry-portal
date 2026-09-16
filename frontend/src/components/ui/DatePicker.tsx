@@ -204,7 +204,7 @@ export function DatePicker({
         // itself is what a reader needs, and `Field` points at it with `aria-describedby`.
         aria-describedby={ariaDescribedBy}
         onClick={() => !disabled && setOpen((o) => !o)}
-        className={`flex w-full items-center justify-between gap-2 rounded-md border bg-white px-3 py-2 text-left text-sm shadow-sm transition focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500 ${
+        className={`flex w-full items-center justify-between gap-2 rounded-md border bg-white px-3 py-2 text-start text-sm shadow-sm transition focus:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500 ${
           invalid
             ? 'border-danger-500 focus-visible:border-danger-500 focus-visible:ring-danger-500/30'
             : 'border-gray-300 focus-visible:border-brand focus-visible:ring-brand/30'

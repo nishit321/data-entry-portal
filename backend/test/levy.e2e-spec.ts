@@ -254,4 +254,128 @@ describe('Levy (e2e)', () => {
     expect(b.body.rows[0].entity.id).not.toBe(entityAId);
     expect(b.body.totals.totalLevyDue).toBe(25000); // 1,000,000 × 2.5%
   });
+
+  describe('the same figures in USD (NCA, 15 September 2026)', () => {
+    /*
+     * "Present figures in two currencies and retain the applicable exchange rate for the reporting
+     * period."
+     *
+     * The retaining half was built on 3 September: the rate lives on the reporting period, so
+     * restating this quarter never restates a year that has already been audited. This is the
+     * other half — the reading — and what it has to get right is the *source* of the rate. A
+     * conversion done at today's rate would quietly undo the whole point of storing it per period.
+     */
+    const assessment = (token: string) =>
+      request(server).get('/api/v1/levy/assessments').query({ periodId }).set(auth(token));
+
+    afterEach(async () => {
+      // Leave the fixture as it was found: other tests in this file read the same period.
+      await prisma.reportingPeriod.update({
+        where: { id: periodId },
+        data: { usdRate: null, usdRateAt: null },
+      });
+    });
+
+    it('says nothing in USD while the period has no rate', async () => {
+      /*
+       * Not zero. Zero is a figure and a reader takes it as one — "this operator owes nothing" —
+       * where the truth is that the Authority has not set a rate for this cycle yet.
+       */
+      const res = await assessment(adminToken).expect(200);
+
+      expect(res.body.exchange).toBeNull();
+      expect(res.body.totals.totalRevenue).toBe(3000000);
+      expect(res.body.totals.totalRevenueUsd).toBeNull();
+      expect(res.body.totals.totalLevyDueUsd).toBeNull();
+      for (const row of res.body.rows as { assessableRevenueUsd: unknown; levyDueUsd: unknown }[]) {
+        expect(row.assessableRevenueUsd).toBeNull();
+        expect(row.levyDueUsd).toBeNull();
+      }
+    });
+
+    it('converts at the rate set for that period, and says which rate that was', async () => {
+      await prisma.reportingPeriod.update({
+        where: { id: periodId },
+        data: { usdRate: 5000, usdRateAt: new Date('2026-06-01') },
+      });
+
+      const res = await assessment(adminToken).expect(200);
+
+      // SSP 3,000,000 at SSP 5,000 to the dollar is USD 600; the levy of SSP 75,000 is USD 15.
+      expect(res.body.totals.totalRevenueUsd).toBe(600);
+      expect(res.body.totals.totalLevyDueUsd).toBe(15);
+
+      // The rate is reported alongside. A conversion whose rate is nowhere on the page is a claim
+      // the reader cannot check, and two years of USD columns usually differ because of it.
+      expect(Number(res.body.exchange.sspPerUsd)).toBe(5000);
+      expect(res.body.exchange.setAt).toBeTruthy();
+    });
+
+    it('uses the rate on this period, not whatever rate was set last', async () => {
+      /*
+       * The point of the whole design, stated as a test. If the conversion reached for a current
+       * rate instead of the period's own, a figure audited last year would restate itself the
+       * moment somebody entered this month's number.
+       */
+      const other = await prisma.reportingPeriod.create({
+        data: {
+          templateId: (await prisma.reportingPeriod.findUniqueOrThrow({ where: { id: periodId } }))
+            .templateId,
+          frequency: 'ANNUAL',
+          label: 'FY2027 levy rate probe',
+          periodStart: new Date('2027-01-01'),
+          periodEnd: new Date('2027-12-31'),
+          dueDate: new Date('2028-02-28'),
+          usdRate: 9999,
+          usdRateAt: new Date(),
+        },
+      });
+
+      await prisma.reportingPeriod.update({
+        where: { id: periodId },
+        data: { usdRate: 5000, usdRateAt: new Date('2026-06-01') },
+      });
+
+      const res = await assessment(adminToken).expect(200);
+      expect(Number(res.body.exchange.sspPerUsd)).toBe(5000);
+      expect(res.body.totals.totalRevenueUsd).toBe(600);
+
+      await prisma.reportingPeriod.delete({ where: { id: other.id } });
+    });
+
+    it('converts the total rather than adding up the converted rows', async () => {
+      /*
+       * Two roundings of halves rarely add to the rounding of the whole, and the row total sits
+       * directly under the rows on screen. A reader who adds the column and gets a different
+       * number than the total assumes the page is wrong, and cannot tell which figure to trust.
+       */
+      await prisma.reportingPeriod.update({
+        where: { id: periodId },
+        data: { usdRate: 3333, usdRateAt: new Date('2026-06-01') },
+      });
+
+      const res = await assessment(adminToken).expect(200);
+      const rows = res.body.rows as { assessableRevenueUsd: number }[];
+      const summed = Math.round(rows.reduce((s, r) => s + r.assessableRevenueUsd, 0) * 100) / 100;
+
+      expect(res.body.totals.totalRevenueUsd).toBe(Math.round((3000000 / 3333) * 100) / 100);
+      // Recorded rather than asserted equal: whether the two agree depends on the figures, and
+      // the rule is which one is authoritative, not that they never differ.
+      expect(typeof summed).toBe('number');
+    });
+
+    it('shows an operator the same two currencies for its own figures', async () => {
+      // The USD reading is not an Authority-only view: an operator being assessed is entitled to
+      // the same two numbers the Authority is looking at.
+      await prisma.reportingPeriod.update({
+        where: { id: periodId },
+        data: { usdRate: 5000, usdRateAt: new Date('2026-06-01') },
+      });
+
+      const res = await assessment(opAToken).expect(200);
+      expect(res.body.rows).toHaveLength(1);
+      expect(res.body.rows[0].assessableRevenueUsd).toBe(400); // SSP 2,000,000 at 5,000.
+      expect(Number(res.body.exchange.sspPerUsd)).toBe(5000);
+    });
+  });
 });

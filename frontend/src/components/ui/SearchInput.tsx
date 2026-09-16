@@ -51,7 +51,7 @@ export function SearchInput({
     <div className="relative">
       <Search
         size={16}
-        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+        className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-gray-500"
         aria-hidden
       />
       <input
@@ -63,14 +63,14 @@ export function SearchInput({
         value={local}
         onChange={(e) => push(e.target.value)}
         placeholder={placeholder}
-        className="block w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-9 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-500 focus-visible:border-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 [&::-webkit-search-cancel-button]:hidden"
+        className="block w-full rounded-md border border-gray-300 bg-white py-2 ps-9 pe-9 text-sm text-gray-900 shadow-sm transition placeholder:text-gray-500 focus-visible:border-brand focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 [&::-webkit-search-cancel-button]:hidden"
       />
       {local && (
         <button
           type="button"
           onClick={clear}
           aria-label="Clear search"
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          className="absolute end-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-500 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
         >
           <X size={15} />
         </button>

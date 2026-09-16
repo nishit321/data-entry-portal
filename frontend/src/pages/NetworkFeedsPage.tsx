@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Antenna, FileSignature, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
@@ -536,11 +537,11 @@ export function NetworkFeedsPage() {
         onClose={() => setAgreementOpen(false)}
       >
         <div className="space-y-4">
-          <Field label="Operator" htmlFor="ag-entity">
+          <Field label={strings.field.operator} htmlFor="ag-entity">
             <Combobox
               aria-label="Operator the agreement is with"
               emptyLabel="Choose an operator"
-              placeholder="Search operators…"
+              placeholder={strings.search.operators}
               source={entityPicker}
               value={agreementForm.entityId}
               onChange={(entityId) => setAgreementForm({ ...agreementForm, entityId })}
@@ -553,6 +554,7 @@ export function NetworkFeedsPage() {
           >
             <Input
               id="ag-ref"
+              placeholder="e.g. NCA/DSA/2026/004"
               value={agreementForm.reference}
               onChange={(e) => setAgreementForm({ ...agreementForm, reference: e.target.value })}
             />
@@ -560,6 +562,7 @@ export function NetworkFeedsPage() {
           <Field label="Title" htmlFor="ag-title">
             <Input
               id="ag-title"
+              placeholder="e.g. Network counters, quarterly"
               value={agreementForm.title}
               onChange={(e) => setAgreementForm({ ...agreementForm, title: e.target.value })}
             />
@@ -571,6 +574,7 @@ export function NetworkFeedsPage() {
           >
             <Textarea
               id="ag-scope"
+              placeholder="What the operator has agreed to share"
               rows={2}
               autoGrow
               value={agreementForm.scope}
@@ -578,7 +582,7 @@ export function NetworkFeedsPage() {
             />
           </Field>
           <Field
-            label="Status"
+            label={strings.field.status}
             htmlFor="ag-status"
             hint="Nothing is collected until this is in force."
           >
@@ -611,7 +615,7 @@ export function NetworkFeedsPage() {
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setAgreementOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={createAgreement.isPending}
@@ -644,9 +648,10 @@ export function NetworkFeedsPage() {
               placeholder="Choose an agreement"
             />
           </Field>
-          <Field label="Name" htmlFor="fd-name">
+          <Field label={strings.field.name} htmlFor="fd-name">
             <Input
               id="fd-name"
+              placeholder="e.g. Traffic counters"
               value={feedForm.name}
               onChange={(e) => setFeedForm({ ...feedForm, name: e.target.value })}
             />
@@ -702,6 +707,7 @@ export function NetworkFeedsPage() {
           >
             <Input
               id="fd-token"
+              placeholder="Sent as a bearer token"
               type="password"
               value={feedForm.authToken}
               onChange={(e) => setFeedForm({ ...feedForm, authToken: e.target.value })}
@@ -709,7 +715,7 @@ export function NetworkFeedsPage() {
           </Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setFeedOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={createFeed.isPending}

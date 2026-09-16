@@ -14,9 +14,10 @@ export interface FieldControlProps {
  * RHF error state and `aria-invalid` for you); reach for `Field` only for controls that
  * manage their own invalid state.
  *
- * Use `hint` for guidance that should always be visible below the label; use `info` when the
- * note is secondary and would otherwise misalign a control against its neighbour in a row — it
- * tucks the text into a hover/focus tooltip on a small ℹ icon beside the label instead.
+ * Use `hint` for guidance that should always be visible below the label. Two fields side by side
+ * stay lined up whether or not either has one, so that is no longer a reason to avoid it — see the
+ * note above the markup. `info` is now a plain editorial choice: a note secondary enough that it
+ * belongs behind a small ℹ tooltip rather than on the page.
  *
  * **The hint and the error are attached to the control, not merely printed under it.** Rendering
  * them as loose paragraphs makes them visible and nothing more: a screen reader announces the
@@ -71,12 +72,29 @@ export function Field({
     });
   })();
 
+  /*
+   * A column that fills its row, with the control pushed to the bottom of it.
+   *
+   * Two fields side by side, one carrying a hint and one not, used to leave their controls on
+   * different lines — the hint took a line the other field did not have, so the inputs stepped.
+   * The note above once told callers to reach for `info` instead when that happened, which is the
+   * same kind of rule this file argues against elsewhere: one that has to be remembered at every
+   * call site is one that will be missed, and it was.
+   *
+   * `gap-1` rather than `space-y-1`, because `space-y-*` sets a top margin on every child after
+   * the first and would win against the `mt-auto` doing the aligning.
+   *
+   * And no `h-full`. A flex or grid row already stretches its children to the tallest of them,
+   * which is exactly the free space `mt-auto` needs; adding an explicit `height: 100%` *stops*
+   * the item stretching and then resolves against an auto-height parent, so it collapses back to
+   * the content and quietly undoes the whole thing. Measured, after trying it the other way.
+   */
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
         <label htmlFor={htmlFor} className="block text-sm font-medium text-gray-700">
           {label}
-          {required && <span className="ml-0.5 text-danger-600">*</span>}
+          {required && <span className="ms-0.5 text-danger-600">*</span>}
         </label>
         {info && (
           <Tooltip content={info}>
@@ -96,7 +114,8 @@ export function Field({
           {hint}
         </p>
       )}
-      {control}
+      {/* `mt-auto` is what lines this up with a neighbour that has no hint. */}
+      <div className="mt-auto">{control}</div>
       {error && (
         // `alert` so the message reaches a screen reader the moment validation puts it there.
         // Without it a submit that fails is silent: the form simply does not go anywhere.

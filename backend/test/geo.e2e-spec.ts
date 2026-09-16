@@ -46,6 +46,10 @@ describe('Network map (e2e)', () => {
   }
 
   async function cleanup() {
+    // Routes first: they point at sites, and a site cannot go while a route still names it.
+    await prisma.fibreLink.deleteMany({
+      where: { entity: { licenceNumber: { in: licences } } },
+    });
     await prisma.networkSite.deleteMany({
       where: { entity: { licenceNumber: { in: licences } } },
     });
@@ -394,5 +398,308 @@ describe('Network map (e2e)', () => {
       .set(auth(opAToken))
       .expect(200);
     expect(res.body.points.some((p: { name: string }) => p.name === 'Retired mast')).toBe(false);
+  });
+
+  describe('fibre routes (NCA, 15 September 2026)', () => {
+    /*
+     * "Network Map: Display the complete fiber route."
+     *
+     * The register keeps points; a route is the line between two of them. Three things are worth
+     * holding here, and only one of them is about drawing:
+     *
+     *  - A route names two sites by id, which is a new way to reach a row. An operator that could
+     *    join one of its own nodes to a competitor's would read that competitor's coordinates
+     *    straight back off the map, which is the one thing this whole module is scoped to prevent.
+     *  - A surveyed route and a straight line look identical on a screen and mean different
+     *    things, so the map has to be able to tell them apart.
+     *  - The straight line is derived, not stored, so moving a node moves the line.
+     */
+    const north = { siteReference: 'A-FN-N', name: 'Juba north node', kind: 'FIBRE_NODE' as const };
+    const south = { siteReference: 'A-FN-S', name: 'Juba south node', kind: 'FIBRE_NODE' as const };
+    let northId: string;
+    let southId: string;
+    let foreignSiteId: string;
+
+    const createLink = (token: string, body: Record<string, unknown>, expected = 201) =>
+      request(server).post('/api/v1/geo/links').set(auth(token)).send(body).expect(expected);
+
+    beforeAll(async () => {
+      northId = (await createSite(opAToken, { ...north, latitude: 4.9, longitude: 31.6 })).body
+        .id as string;
+      southId = (await createSite(opAToken, { ...south, latitude: 4.7, longitude: 31.6 })).body
+        .id as string;
+      foreignSiteId = (
+        await createSite(opBToken, {
+          siteReference: 'B-FN-1',
+          name: 'Other operator node',
+          kind: 'FIBRE_NODE',
+          latitude: 5.1,
+          longitude: 31.8,
+        })
+      ).body.id as string;
+    });
+
+    it('joins two of an operator own nodes', async () => {
+      const created = await createLink(opAToken, {
+        linkReference: 'A-LINK-1',
+        name: 'Juba metro ring',
+        fromSiteId: northId,
+        toSiteId: southId,
+        lengthKm: 34.5,
+        capacityGbps: 100,
+      });
+      expect(created.body.fromSite.name).toBe(north.name);
+      expect(created.body.toSite.name).toBe(south.name);
+      // Reported, not derived: the two nodes are about 22 km apart in a straight line, and the
+      // cable between them is 34.5 km because it follows the road.
+      expect(Number(created.body.lengthKm)).toBe(34.5);
+    });
+
+    it('refuses a route that reaches into another operator register (400)', async () => {
+      /*
+       * The segregation test for this table. Both ids are well-formed and one of them exists, so
+       * nothing but an explicit ownership check stops this — and without it the response would
+       * hand back the other operator's node name and, through the map, its coordinates.
+       */
+      const res = await createLink(
+        opAToken,
+        {
+          linkReference: 'A-LINK-X',
+          name: 'Reaching across',
+          fromSiteId: northId,
+          toSiteId: foreignSiteId,
+        },
+        400,
+      );
+      expect(res.body.message).toMatch(/own register/i);
+    });
+
+    it('refuses a route from a node to itself (400)', async () => {
+      await createLink(
+        opAToken,
+        {
+          linkReference: 'A-LINK-LOOP',
+          name: 'Nowhere to nowhere',
+          fromSiteId: northId,
+          toSiteId: northId,
+        },
+        400,
+      );
+    });
+
+    it('refuses the same reference twice for one operator (400)', async () => {
+      await createLink(
+        opAToken,
+        {
+          linkReference: 'A-LINK-1',
+          name: 'Same reference again',
+          fromSiteId: northId,
+          toSiteId: southId,
+        },
+        400,
+      );
+    });
+
+    it('draws a straight line when nobody has surveyed the route', async () => {
+      const res = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+
+      const route = res.body.routes.find((r: { name: string }) => r.name === 'Juba metro ring');
+      expect(route).toBeDefined();
+      // Two points, being the two ends, and flagged as not a survey. The flag is what lets the map
+      // draw this differently from a route somebody has actually walked.
+      expect(route.surveyed).toBe(false);
+      expect(route.path).toEqual([
+        [4.9, 31.6],
+        [4.7, 31.6],
+      ]);
+    });
+
+    it('moves the straight line when a node moves', async () => {
+      // The line is worked out from where the nodes are now, not stored when the route was made.
+      // A register where correcting a mast's coordinates left the cable hanging in the old place
+      // would be worse than one with no routes at all.
+      await request(server)
+        .patch(`/api/v1/geo/sites/${southId}`)
+        .set(auth(opAToken))
+        .send({ latitude: 4.5, longitude: 31.7 })
+        .expect(200);
+
+      const res = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+      const route = res.body.routes.find((r: { name: string }) => r.name === 'Juba metro ring');
+      expect(route.path[1]).toEqual([4.5, 31.7]);
+    });
+
+    it('draws the surveyed route when the operator supplies one', async () => {
+      const list = await request(server)
+        .get('/api/v1/geo/links')
+        .query({ search: 'A-LINK-1' })
+        .set(auth(opAToken))
+        .expect(200);
+      const id = list.body.data[0].id as string;
+
+      // Three points: the two ends and a bend where the cable follows the road.
+      await request(server)
+        .patch(`/api/v1/geo/links/${id}`)
+        .set(auth(opAToken))
+        .send({
+          path: [
+            [4.9, 31.6],
+            [4.8, 31.75],
+            [4.5, 31.7],
+          ],
+        })
+        .expect(200);
+
+      const res = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+      const route = res.body.routes.find((r: { name: string }) => r.name === 'Juba metro ring');
+      expect(route.surveyed).toBe(true);
+      expect(route.path).toHaveLength(3);
+      expect(route.path[1]).toEqual([4.8, 31.75]);
+    });
+
+    it('goes back to the straight line when the survey is taken off', async () => {
+      const list = await request(server)
+        .get('/api/v1/geo/links')
+        .query({ search: 'A-LINK-1' })
+        .set(auth(opAToken))
+        .expect(200);
+      const id = list.body.data[0].id as string;
+
+      // An empty array is how a route is cleared. It has to land somewhere distinguishable from
+      // "leave it alone", or a bad import could never be undone.
+      await request(server)
+        .patch(`/api/v1/geo/links/${id}`)
+        .set(auth(opAToken))
+        .send({ path: [] })
+        .expect(200);
+
+      const res = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+      const route = res.body.routes.find((r: { name: string }) => r.name === 'Juba metro ring');
+      expect(route.surveyed).toBe(false);
+      expect(route.path).toHaveLength(2);
+    });
+
+    it('refuses a route that runs through the middle of the ocean (400)', async () => {
+      const res = await createLink(
+        opAToken,
+        {
+          linkReference: 'A-LINK-SEA',
+          name: 'Through nowhere',
+          fromSiteId: northId,
+          toSiteId: southId,
+          path: [
+            [4.9, 31.6],
+            [0, 0],
+            [4.5, 31.7],
+          ],
+        },
+        400,
+      );
+      // Named by position, so somebody with a thousand-point import knows where to look.
+      expect(res.body.message).toMatch(/Zero and zero|out at sea/i);
+    });
+
+    it('refuses a point that is not a pair of numbers (400)', async () => {
+      await createLink(
+        opAToken,
+        {
+          linkReference: 'A-LINK-JUNK',
+          name: 'Malformed',
+          fromSiteId: northId,
+          toSiteId: southId,
+          path: [
+            [4.9, 31.6],
+            ['north', 'a bit east'],
+          ],
+        },
+        400,
+      );
+    });
+
+    it('shows an operator only its own routes', async () => {
+      await createLink(opBToken, {
+        linkReference: 'B-LINK-1',
+        name: 'Other operator route',
+        fromSiteId: foreignSiteId,
+        toSiteId: (
+          await createSite(opBToken, {
+            siteReference: 'B-FN-2',
+            name: 'Other operator node two',
+            kind: 'FIBRE_NODE',
+            latitude: 5.3,
+            longitude: 31.9,
+          })
+        ).body.id,
+      });
+
+      const mine = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+      const names = (mine.body.routes as { name: string }[]).map((r) => r.name);
+      expect(names).toContain('Juba metro ring');
+      expect(names).not.toContain('Other operator route');
+
+      // The Authority sees both, which is the point of the sector view.
+      const sector = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(adminToken))
+        .expect(200);
+      const all = (sector.body.routes as { name: string }[]).map((r) => r.name);
+      expect(all).toEqual(expect.arrayContaining(['Juba metro ring', 'Other operator route']));
+    });
+
+    it('keeps routes on the map when the layer is narrowed to one kind of site', async () => {
+      /*
+       * A site kind describes a node. A route is not a node, so filtering the map to base stations
+       * must not silently drop every fibre run: a reader would conclude the operator has none.
+       */
+      const res = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ kind: NetworkSiteKind.BASE_STATION, includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+      expect(res.body.routes.some((r: { name: string }) => r.name === 'Juba metro ring')).toBe(
+        true,
+      );
+    });
+
+    it('takes a route off the map when it is removed', async () => {
+      const list = await request(server)
+        .get('/api/v1/geo/links')
+        .query({ search: 'A-LINK-1' })
+        .set(auth(opAToken))
+        .expect(200);
+      const id = list.body.data[0].id as string;
+
+      await request(server).delete(`/api/v1/geo/links/${id}`).set(auth(opAToken)).expect(200);
+
+      const res = await request(server)
+        .get('/api/v1/geo/map')
+        .query({ includeAgents: 'false' })
+        .set(auth(opAToken))
+        .expect(200);
+      expect(res.body.routes.some((r: { name: string }) => r.name === 'Juba metro ring')).toBe(
+        false,
+      );
+    });
   });
 });

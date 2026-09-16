@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { strings } from '../../lib/strings';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useScrollLock } from '../../hooks/useScrollLock';
@@ -99,7 +100,7 @@ export function Modal({
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={strings.action.close}
             className="rounded-md p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             onClick={onClose}
           >

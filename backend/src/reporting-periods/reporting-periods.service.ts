@@ -7,7 +7,7 @@ import { paginate, toSkipTake } from '../common/utils/pagination.util';
 import { graceEndsAt, periodPhase, type PeriodPhase } from '../common/utils/period-timeline.util';
 import { EnforcementService } from '../enforcement/enforcement.service';
 import { CreatePeriodDto, PeriodQueryDto, UpdatePeriodDto } from './dto/period.dto';
-import { periodSelect } from './reporting-periods.constants';
+import { periodSelect, STARTING_USD_RATE } from './reporting-periods.constants';
 
 type PeriodRow = Prisma.ReportingPeriodGetPayload<{ select: typeof periodSelect }>;
 
@@ -86,6 +86,7 @@ export class ReportingPeriodsService {
     }
 
     const status = dto.status ?? PeriodStatus.OPEN;
+    const usdRate = dto.usdRate ?? (await this.rateToCarryForward());
     const period = await this.prisma.reportingPeriod.create({
       data: {
         templateId: dto.templateId,
@@ -97,6 +98,8 @@ export class ReportingPeriodsService {
         graceDays: dto.graceDays ?? 5,
         status,
         openedAt: status === PeriodStatus.OPEN ? new Date() : null,
+        usdRate,
+        usdRateAt: usdRate === null ? null : new Date(),
       },
       select: periodSelect,
     });
@@ -106,6 +109,29 @@ export class ReportingPeriodsService {
       status,
     });
     return this.withTimeline(period);
+  }
+
+  /**
+   * The rate a new period starts with: whatever the last one used.
+   *
+   * Scheduling next quarter should not mean retyping a number that has not moved, and a rate
+   * typed again is a rate eventually typed wrong. `STARTING_USD_RATE` is only reached on the very
+   * first period, and it is NCA's figure rather than ours.
+   */
+  private async rateToCarryForward(): Promise<Prisma.Decimal | number> {
+    /*
+     * The rate most recently *set*, not the one on the latest period by date.
+     *
+     * Those differ, and the difference matters: periods are often scheduled ahead, and a year of
+     * them created in one sitting all start on different days but carry the same rate. What an
+     * administrator means by "the current rate" is the last figure somebody entered.
+     */
+    const previous = await this.prisma.reportingPeriod.findFirst({
+      where: { deletedAt: null, usdRate: { not: null } },
+      orderBy: [{ usdRateAt: 'desc' }, { createdAt: 'desc' }],
+      select: { usdRate: true },
+    });
+    return previous?.usdRate ?? STARTING_USD_RATE;
   }
 
   async update(id: string, dto: UpdatePeriodDto, actorId: string, ctx: RequestContext) {
@@ -122,6 +148,8 @@ export class ReportingPeriodsService {
       where: { id },
       data: {
         label: dto.label?.trim(),
+        usdRate: dto.usdRate,
+        usdRateAt: dto.usdRate === undefined ? undefined : new Date(),
         periodStart: dto.periodStart ? periodStart : undefined,
         periodEnd: dto.periodEnd ? periodEnd : undefined,
         dueDate: dto.dueDate ? dueDate : undefined,

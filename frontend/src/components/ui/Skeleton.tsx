@@ -21,7 +21,7 @@ export function SkeletonTable({ rows = 6, columns = 4 }: { rows?: number; column
             {Array.from({ length: columns }).map((_, c) => (
               <Skeleton
                 key={c}
-                className={`h-4 ${c === 0 ? 'w-1/4' : c === columns - 1 ? 'ml-auto w-16' : 'w-1/5'}`}
+                className={`h-4 ${c === 0 ? 'w-1/4' : c === columns - 1 ? 'ms-auto w-16' : 'w-1/5'}`}
               />
             ))}
           </div>

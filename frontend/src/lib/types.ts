@@ -69,6 +69,10 @@ export interface MfaChallenge {
   mfaRequired: true;
   challengeId: string;
   expiresInSec: number;
+  /** Which factor to ask for. Asking for the wrong one is a dead end the user cannot escape. */
+  method: 'email' | 'totp';
+  /** Whether a recovery code would also be accepted, so the screen can offer that way out. */
+  recoveryAvailable?: boolean;
   /** Only outside production: the static demo OTP, shown as a hint. */
   devOtp?: string;
 }
@@ -944,11 +948,51 @@ export interface MapPoint {
   coverageM?: number | null;
 }
 
+/** One point on a route, as [latitude, longitude]. */
+export type RoutePoint = [number, number];
+
+/**
+ * A fibre route as the map draws it.
+ *
+ * `surveyed` is the field that keeps the map honest. A straight line between two nodes looks
+ * exactly like a surveyed route and is not one, so the two are drawn differently and the popup
+ * says which it is. Without that, every line on the screen reads as a cable somebody has walked.
+ */
+export interface MapRoute {
+  id: string;
+  name: string;
+  status: NetworkSiteStatus;
+  path: RoutePoint[];
+  surveyed: boolean;
+  lengthKm: number | null;
+  capacityGbps: number | null;
+  entity: { id: string; name: string };
+  from: string;
+  to: string;
+}
+
 export interface MapReport {
   points: MapPoint[];
+  routes: MapRoute[];
   /** True when the cap bit and the map is showing only part of the picture. */
   truncated: boolean;
-  counts: { sites: number; agents: number };
+  counts: { sites: number; agents: number; routes: number };
+}
+
+/** A fibre route on the register, as the list shows it. */
+export interface FibreLink {
+  id: string;
+  linkReference: string;
+  name: string;
+  status: NetworkSiteStatus;
+  lengthKm: string | number | null;
+  capacityGbps: number | null;
+  path: RoutePoint[] | null;
+  commissionedAt: string | null;
+  createdAt: string;
+  entity: { id: string; name: string; type: EntityType };
+  fromSite: { id: string; name: string; siteReference: string };
+  toSite: { id: string; name: string; siteReference: string };
 }
 
 // --- Scheduled sector reports (Phase 2) ---
@@ -975,6 +1019,26 @@ export const REPORT_FREQUENCY_LABELS: Record<ReportFrequency, string> = {
   QUARTERLY: 'Every quarter',
 };
 
+export const REPORT_COVERAGES = ['LAST_CLOSED_PERIOD', 'LATEST_ACTIVITY'] as const;
+export type ReportCoverage = (typeof REPORT_COVERAGES)[number];
+
+/** What each run covers, in the words somebody setting one up would use. */
+export const REPORT_COVERAGE_LABELS: Record<ReportCoverage, string> = {
+  LAST_CLOSED_PERIOD: 'The period that has just closed',
+  LATEST_ACTIVITY: 'How things stand on the day it goes out',
+};
+
+/**
+ * Why a reader would pick one over the other.
+ *
+ * Worth spelling out on the form. The two produce different reports from the same figures, and
+ * which is right follows from what the report is for rather than from a preference.
+ */
+export const REPORT_COVERAGE_HINTS: Record<ReportCoverage, string> = {
+  LAST_CLOSED_PERIOD: 'For a statement about a period that is finished, such as a levy assessment.',
+  LATEST_ACTIVITY: 'For chasing the period that is still open, such as who has not filed yet.',
+};
+
 /** Weekday names for a weekly schedule; the API stores Monday as 1. */
 export const WEEKDAY_LABELS = [
   'Monday',
@@ -995,6 +1059,8 @@ export interface ReportSchedule {
   name: string;
   kind: ScheduledReportKind;
   frequency: ReportFrequency;
+  /** Which period each run covers, worked out when it goes out rather than fixed on the schedule. */
+  coverage: ReportCoverage;
   dayOfPeriod: number;
   hour: number;
   isEnabled: boolean;
@@ -1051,10 +1117,32 @@ export interface PublicIndicatorSeries {
   points: PublicPoint[];
 }
 
+export interface PublicPeriod {
+  id: string;
+  label: string;
+  dueDate: string;
+}
+
 export interface PublicIndicatorReport {
   threshold: number;
-  periods: { id: string; label: string; dueDate: string }[];
+  periods: PublicPeriod[];
   indicators: PublicIndicatorSeries[];
+  /** What the reader narrowed by. Echoed back so a download can say what it is a view of. */
+  filters: { from: string | null; to: string | null; search: string | null };
+}
+
+/**
+ * What a reader may narrow the public figures by.
+ *
+ * Period range, one indicator, and free text. Nothing here selects operators, and nothing here
+ * should: the disclosure threshold works by counting how many operators a figure rests on, so a
+ * filter that could thin that count would hand back a named company's return as a sector total.
+ */
+export interface PublicPortalFilters {
+  from?: string;
+  to?: string;
+  indicatorId?: string;
+  search?: string;
 }
 
 export interface PublicComplaintsSummary {
@@ -1191,7 +1279,36 @@ export interface ComplaintTracking {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string | null;
+  /**
+   * How many files are on the case.
+   *
+   * A count and not a list, because this is the public side: the sender's question is whether
+   * their photo arrived, and answering it with file names would make the tracking code a way to
+   * read material out of the Authority's case file.
+   */
+  attachmentCount: number;
 }
+
+/** A file on a complaint, as the Authority sees it. Never returned to the public side. */
+export interface ComplaintAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+/**
+ * What a member of the public may attach to a complaint, as the file picker's `accept` list.
+ *
+ * Kept in step with the server by hand, and deliberately: this is the courtesy filter in the
+ * chooser dialog, not the check. The server validates the bytes, so a file dragged past this list
+ * is still refused — what it costs is the citizen's time rather than the Authority's safety.
+ */
+export const COMPLAINT_FILE_FORMATS = '.pdf,.png,.jpg,.jpeg';
+
+/** How many files one complaint may carry. Matches the limit the server enforces. */
+export const MAX_COMPLAINT_FILES = 3;
 
 // --- Documents (licence repository) ---
 
@@ -1246,6 +1363,14 @@ export interface LevyAssessmentRow {
   entity: { id: string; name: string; type: EntityType };
   assessableRevenue: number;
   levyDue: number | null;
+  /**
+   * The same amounts in USD, at the rate set for this reporting period.
+   *
+   * `null` when the period has no rate yet. Not zero: zero is a figure and reads as one, while
+   * null is the screen saying it cannot tell you.
+   */
+  assessableRevenueUsd: number | null;
+  levyDueUsd: number | null;
 }
 
 export interface LevyAssessment {
@@ -1254,7 +1379,15 @@ export interface LevyAssessment {
   /** False when the questionnaire has no field marked as the levy basis. */
   levyBasisConfigured: boolean;
   rate: { id: string; ratePercent: number; label?: string | null } | null;
-  totals: { operatorsAssessed: number; totalRevenue: number; totalLevyDue: number | null };
+  /** The rate the USD figures were converted at, and when the Authority set it. */
+  exchange: { sspPerUsd: number; setAt: string | null } | null;
+  totals: {
+    operatorsAssessed: number;
+    totalRevenue: number;
+    totalLevyDue: number | null;
+    totalRevenueUsd: number | null;
+    totalLevyDueUsd: number | null;
+  };
   rows: LevyAssessmentRow[];
 }
 

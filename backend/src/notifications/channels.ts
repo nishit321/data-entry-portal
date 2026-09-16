@@ -89,6 +89,8 @@ export class EmailNotificationChannel implements NotificationChannel {
  * - **A return sent back** — the deadline is still running and they have to fix and resubmit.
  * - **A compliance case opened** — they are already non-compliant, and penalties may be accruing.
  * - **A licence expiring or expired** — a lapsed licence is not a paperwork problem.
+ * - **A second factor removed by an administrator** — if the account holder did not ask for it,
+ *   somebody is taking their account, and the minutes matter.
  *
  * Deliberately absent: a return being approved (good news, nothing to do), a return reaching a
  * reviewer (internal), a citizen complaint arriving (internal, and the Authority is at its desks).
@@ -98,6 +100,8 @@ export class EmailNotificationChannel implements NotificationChannel {
  * constant so that changing it is a deliberate edit with this reasoning next to it.
  */
 export const SMS_WORTHY: ReadonlySet<NotificationType> = new Set([
+  // Somebody removed the second factor from your account. If it was not you, every minute counts.
+  NotificationType.SECURITY_MFA_RESET,
   NotificationType.RETURN_REJECTED,
   NotificationType.ENFORCEMENT_CASE_OPENED,
   NotificationType.DOCUMENT_EXPIRING,

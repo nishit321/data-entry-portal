@@ -1,4 +1,5 @@
 import { api } from './api';
+import { saveBlob } from './download';
 import type { DocumentKind, DocumentRecord, Paginated } from './types';
 
 export interface DocumentListParams {
@@ -49,14 +50,7 @@ export const documentsApi = {
   /** Fetch the blob so the browser can save it under its original file name. */
   download: async (doc: DocumentRecord) => {
     const res = await api.get<Blob>(`/documents/${doc.id}/download`, { responseType: 'blob' });
-    const url = URL.createObjectURL(res.data);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = doc.fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(res.data, doc.fileName);
   },
 
   remove: (id: string) => api.delete<{ message: string }>(`/documents/${id}`).then((r) => r.data),

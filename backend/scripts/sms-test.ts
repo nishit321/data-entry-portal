@@ -69,7 +69,7 @@ async function main() {
     const result = await provider.send(phone, message);
     console.log('  The gateway accepted it.');
     console.log('');
-    console.log('  Reference it gave us:', result.providerRef ?? '(none — see the payload below)');
+    console.log('  Reference it gave us:', result.providerRef ?? '(none. See the payload below.)');
     console.log('  Raw `data` payload, whole:');
     console.log(JSON.stringify(result.raw, null, 2).replace(/^/gm, '    '));
     console.log('');

@@ -29,7 +29,10 @@ function hex(token: string): string {
   if (name === 'white') return '#ffffff';
   if (name === 'black') return '#000000';
 
-  const [family, shade] = name.split(/-(?=\d+$)/);
+  // Split at the last hyphen, so `brand-900` and `sidebar-dim` both resolve. It used to split
+  // only before trailing digits, which meant a token named for its role could not be checked at
+  // all — and a colour nothing can check is how the sidebar's 3.04:1 survived §3.5.
+  const [family, shade] = name.split(/-(?=[^-]+$)/);
   const own = themeColors[family as string];
   if (own) {
     if (typeof own === 'string') return own;
@@ -92,7 +95,25 @@ const TEXT_ON_PAGE: [string, string][] = [
   ['text-brand-800', 'bg-white'],
 ];
 
+/**
+ * The sidebar, which sits on navy rather than on either page ground.
+ *
+ * It was missing from the tables above, and that is exactly why its section headings shipped at
+ * 3.04:1: a pair nothing measures is a pair nobody notices. `sidebar-fg` and `sidebar-muted` carry
+ * real text; `sidebar-dim` is the quiet furniture and is held to the same bar because a heading
+ * somebody cannot read is not furniture.
+ */
+const TEXT_ON_SIDEBAR: [string, string][] = [
+  ['text-sidebar-fg', 'bg-brand-900'],
+  ['text-sidebar-muted', 'bg-brand-900'],
+  ['text-sidebar-dim', 'bg-brand-900'],
+];
+
 describe('colour contrast', () => {
+  it.each(TEXT_ON_SIDEBAR)('%s on %s', (fg, bg) => {
+    expect(contrast(fg, bg)).toBeGreaterThanOrEqual(TEXT_AA);
+  });
+
   it.each(TEXT_ON_TINT)('%s on %s', (fg, bg) => {
     expect(contrast(fg, bg)).toBeGreaterThanOrEqual(TEXT_AA);
   });

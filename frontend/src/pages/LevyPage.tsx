@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Coins, Download, FileText, Percent, Plus, Trash2, Users } from 'lucide-react';
 import {
@@ -26,7 +27,7 @@ import { exportsApi } from '../lib/exports.api';
 import { periodPicker } from '../lib/pickers';
 import { getErrorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { formatDate, formatSsp, joinMeta } from '../lib/format';
+import { formatDate, formatNumber, formatSsp, formatUsd, joinMeta } from '../lib/format';
 import {
   ENTITY_TYPE_LABELS,
   isOperatorRole,
@@ -120,18 +121,31 @@ export function LevyPage() {
         </div>
       ),
     },
+    /*
+     * USD sits under each SSP figure rather than in columns of its own.
+     *
+     * Four money columns on one row is where a reader starts checking the header to know which
+     * number they are looking at. Stacking keeps the pair together, and it is the pair that
+     * matters: the same amount, read two ways, at one rate.
+     */
     {
       header: 'Assessable revenue',
       align: 'right',
       cell: (r) => (
-        <span className="tabular-nums text-gray-700">{formatSsp(r.assessableRevenue)}</span>
+        <div className="tabular-nums">
+          <div className="text-gray-700">{formatSsp(r.assessableRevenue)}</div>
+          <div className="text-xs text-gray-500">{formatUsd(r.assessableRevenueUsd)}</div>
+        </div>
       ),
     },
     {
       header: 'Levy due',
       align: 'right',
       cell: (r) => (
-        <span className="tabular-nums font-medium text-gray-900">{formatSsp(r.levyDue)}</span>
+        <div className="tabular-nums">
+          <div className="font-medium text-gray-900">{formatSsp(r.levyDue)}</div>
+          <div className="text-xs text-gray-500">{formatUsd(r.levyDueUsd)}</div>
+        </div>
       ),
     },
   ];
@@ -174,11 +188,11 @@ export function LevyPage() {
         />
 
         <div className="flex flex-wrap gap-4">
-          <FilterField label="Reporting period" width="xl">
+          <FilterField label={strings.field.reportingPeriod} width="xl">
             <Combobox
               aria-label="Choose a reporting period"
               emptyLabel="Most recent assessed period"
-              placeholder="Search periods…"
+              placeholder={strings.search.periods}
               source={periodPicker}
               value={periodId}
               onChange={setPeriodId}
@@ -224,12 +238,14 @@ export function LevyPage() {
               <StatCard
                 label="Assessable revenue"
                 value={formatSsp(a.totals.totalRevenue)}
+                hint={formatUsd(a.totals.totalRevenueUsd)}
                 icon={Coins}
                 tone="brand"
               />
               <StatCard
                 label="Levy due"
                 value={formatSsp(a.totals.totalLevyDue)}
+                hint={formatUsd(a.totals.totalLevyDueUsd)}
                 icon={Percent}
                 tone={a.totals.totalLevyDue === null ? 'gray' : 'success'}
               />
@@ -252,6 +268,16 @@ export function LevyPage() {
                       a.template?.name,
                       `due ${formatDate(a.period.dueDate)}`,
                       a.rate ? `rate ${a.rate.ratePercent}%` : 'no rate set',
+                      /*
+                       * The exchange rate is shown, not left implicit.
+                       *
+                       * Two years of USD figures usually differ because the rate moved, not
+                       * because the business did. A conversion whose rate is nowhere on the page
+                       * is a claim the reader cannot check.
+                       */
+                      a.exchange
+                        ? `SSP ${formatNumber(a.exchange.sspPerUsd, 0)} to USD 1`
+                        : 'no exchange rate set',
                     )}
                   </p>
                 </div>
@@ -318,6 +344,7 @@ export function LevyPage() {
           <Field label="Rate (%)" htmlFor="levy-rate">
             <Input
               id="levy-rate"
+              placeholder="e.g. 2.5"
               type="number"
               step="0.0001"
               min="0"
@@ -347,19 +374,20 @@ export function LevyPage() {
             />
           </Field>
           <Field
-            label="Label"
+            label={strings.field.label}
             htmlFor="levy-label"
             hint="Optional, e.g. the instrument it comes from."
           >
             <Input
               id="levy-label"
+              placeholder="e.g. 2026 annual levy"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
             />
           </Field>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setRateOpen(false)}>
-              Cancel
+              {strings.action.cancel}
             </Button>
             <Button
               isLoading={createRate.isPending}
