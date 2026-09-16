@@ -25,6 +25,7 @@ export { Page } from './Page';
 export { PageHeader } from './PageHeader';
 export { Breadcrumb } from './Breadcrumb';
 export { ListShell, type ActiveFilterChip } from './ListShell';
+export { BulkBar } from './BulkBar';
 export { Tabs, type TabItem } from './Tabs';
 
 // States

@@ -2158,6 +2158,15 @@ describe('audit coverage (e2e)', () => {
           frequency: 'MONTHLY',
           dayOfPeriod: 1,
           hour: 7,
+          /*
+           * Stated, not left to the default.
+           *
+           * A schedule defaults to covering the period that has just closed, and refuses to send
+           * when nothing has closed. This probe is about whether a send is audited, so it must not
+           * depend on some other suite happening to have a closed period in the shared database at
+           * the moment it runs. It passed for weeks on exactly that accident.
+           */
+          coverage: 'LATEST_ACTIVITY',
           recipientIds: [actorIds[0]],
         });
       expect(schedule.status).toBe(201);

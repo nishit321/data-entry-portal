@@ -3,9 +3,12 @@ import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldAlert } from 'lucide-react';
 import {
+  Alert,
   Badge,
   Button,
   Combobox,
+  DescriptionList,
+  Drawer,
   FilterField,
   ListShell,
   Modal,
@@ -18,6 +21,7 @@ import {
 } from '../components/ui';
 import { DataTable, type Column } from '../components/DataTable';
 import { PenaltySchedulePanel } from '../components/PenaltySchedulePanel';
+import { EnforcementOrders } from '../components/EnforcementOrders';
 import {
   enforcementApi,
   enforcementKeys,
@@ -28,7 +32,8 @@ import { entityPicker, periodPicker } from '../lib/pickers';
 import { getErrorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { ENFORCEMENT_STATUS_TONE } from '../lib/status';
-import { formatDate, formatSsp } from '../lib/format';
+import { penaltyStanding } from '../lib/penalty-standing';
+import { formatDate, formatSsp, joinMeta } from '../lib/format';
 import {
   ENFORCEMENT_REASON_LABELS,
   ENFORCEMENT_STATUS_LABELS,
@@ -63,7 +68,9 @@ export function EnforcementPage() {
     filters: { status: '', entityId: '', periodId: '' },
   });
 
+  const [open, setOpen] = useState<EnforcementCase | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
+  const pendingStanding = pending ? penaltyStanding(pending.case) : null;
   const [note, setNote] = useState('');
 
   const params: EnforcementListParams = {
@@ -179,20 +186,8 @@ export function EnforcementPage() {
     {
       header: 'Penalty',
       align: 'right',
-      width: '10rem',
-      cell: (c) =>
-        c.penaltyAmount === null || c.penaltyAmount === undefined ? (
-          <span className="text-gray-300">Not priced</span>
-        ) : (
-          <div className="min-w-0">
-            <div className="tabular-nums font-medium text-gray-900">
-              {formatSsp(Number(c.penaltyAmount))}
-            </div>
-            <div className="text-xs text-gray-500">
-              {c.penaltyDays === 1 ? '1 day late' : `${c.penaltyDays ?? 0} days late`}
-            </div>
-          </div>
-        ),
+      width: '13rem',
+      cell: (c) => <PenaltyCell case={c} />,
     },
     {
       header: 'Outcome',
@@ -309,6 +304,8 @@ export function EnforcementPage() {
         columns={columns}
         rows={rows}
         rowKey={(c) => c.id}
+        onRowClick={setOpen}
+        activeRowKey={open?.id}
         loading={listQuery.isLoading}
         refreshing={listQuery.isFetching && !listQuery.isLoading}
         error={listQuery.isError}
@@ -327,6 +324,14 @@ export function EnforcementPage() {
         <PenaltySchedulePanel canManage={canManage} />
       </div>
 
+      <Drawer
+        open={open !== null}
+        onClose={() => setOpen(null)}
+        title={open ? `${open.entity.name}: ${open.period.label}` : 'Compliance case'}
+      >
+        {open && <CaseDetail case={open} currentUserId={user?.id} canManage={canManage} />}
+      </Drawer>
+
       <Modal
         open={pending !== null}
         title={pending?.kind === 'waive' ? 'Waive this case?' : 'Resolve this case?'}
@@ -339,6 +344,29 @@ export function EnforcementPage() {
               ? `Waive the ${pending?.case.period.label} case for ${pending?.case.entity.name} without further action.`
               : `Mark the ${pending?.case.period.label} case for ${pending?.case.entity.name} resolved.`}
           </p>
+          {/*
+            What is being given up, said before the button is pressed.
+            Waiving an amount the operator already owes and waiving one that has not become payable
+            yet are different acts, and the officer doing it should not have to work out which from
+            a figure in a table they have already scrolled past.
+          */}
+          {pendingStanding && pendingStanding.kind !== 'not-priced' && pending && (
+            <Alert tone={pendingStanding.kind === 'payable' ? 'warning' : 'info'}>
+              {pendingStanding.kind === 'payable' ? (
+                <>
+                  {formatSsp(Number(pending.case.penaltyAmount))} is payable on this case.
+                  {pending.kind === 'waive' ? ' Waiving it writes that amount off.' : ''}
+                </>
+              ) : pendingStanding.kind === 'accruing' ? (
+                <>
+                  {formatSsp(Number(pending.case.penaltyAmount))} has accrued but is not payable
+                  yet. The operator has until {formatDate(pendingStanding.remedyEndsAt)} to file.
+                </>
+              ) : (
+                <>This case is already closed.</>
+              )}
+            </Alert>
+          )}
           <Textarea
             rows={3}
             autoGrow
@@ -367,5 +395,142 @@ export function EnforcementPage() {
         </div>
       </Modal>
     </ListShell>
+  );
+}
+
+/**
+ * A penalty figure, and whether the operator owes it yet.
+ *
+ * The amount on its own reads as a demand. Under the Act nothing is payable until thirty days'
+ * notice has run, so for much of a case's life the figure is real, growing, and not owed — and the
+ * screen said nothing to tell those two apart. The second line is the whole point of this
+ * component; the number was already there.
+ */
+function PenaltyCell({ case: c }: { case: EnforcementCase }) {
+  const standing = penaltyStanding(c);
+  if (standing.kind === 'not-priced') return <span className="text-gray-300">Not priced</span>;
+
+  const days = c.penaltyDays === 1 ? '1 day late' : `${c.penaltyDays ?? 0} days late`;
+
+  return (
+    <div className="min-w-0">
+      <div
+        className={`tabular-nums font-medium ${
+          standing.kind === 'accruing' ? 'text-gray-600' : 'text-gray-900'
+        }`}
+      >
+        {formatSsp(Number(c.penaltyAmount))}
+      </div>
+      {standing.kind === 'accruing' ? (
+        <div className="text-xs text-warning-700">
+          {/*
+            The date, not only the count. "15 days left" is what an officer wants at a glance; the
+            date is what goes in a letter, and a reader should not have to do the arithmetic.
+          */}
+          Not payable until {formatDate(standing.remedyEndsAt)}
+          <span className="text-gray-500">
+            {' '}
+            ({standing.daysLeft === 1 ? '1 day left' : `${standing.daysLeft} days left`})
+          </span>
+        </div>
+      ) : standing.kind === 'payable' ? (
+        <div className="text-xs text-gray-500">{joinMeta(days, 'payable')}</div>
+      ) : (
+        <div className="text-xs text-gray-500">{days}</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One compliance case, opened from the list.
+ *
+ * The case itself was always readable from the row; what needed a place to live is the formal
+ * enforcement order, which is a different kind of thing from a penalty and does not belong in a
+ * money column. A drawer rather than a page, because an officer working a list of cases is
+ * comparing them, and sending them to a separate screen and back loses their place in the list.
+ */
+function CaseDetail({
+  case: c,
+  currentUserId,
+  canManage,
+}: {
+  case: EnforcementCase;
+  currentUserId: string | undefined;
+  canManage: boolean;
+}) {
+  const standing = penaltyStanding(c);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={ENFORCEMENT_STATUS_TONE[c.status]}>
+          {ENFORCEMENT_STATUS_LABELS[c.status]}
+        </Badge>
+        <span className="text-sm text-gray-500">{ENFORCEMENT_REASON_LABELS[c.reason]}</span>
+      </div>
+
+      <DescriptionList
+        items={[
+          { label: 'Operator', value: c.entity.name },
+          { label: 'Period', value: c.period.label },
+          { label: 'Filing deadline', value: formatDate(c.period.dueDate) },
+          { label: 'Case opened', value: formatDate(c.openedAt) },
+          {
+            label: 'Default began',
+            value: c.defaultStartedAt ? formatDate(c.defaultStartedAt) : null,
+          },
+          {
+            label: 'Return arrived',
+            value: c.defaultEndedAt ? formatDate(c.defaultEndedAt) : 'Still outstanding',
+          },
+        ]}
+      />
+
+      {standing.kind !== 'not-priced' && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Penalty</div>
+          <div className="mt-1 text-lg font-semibold tabular-nums text-gray-900">
+            {formatSsp(Number(c.penaltyAmount))}
+          </div>
+          {/*
+            The same distinction the list column draws, repeated here rather than assumed. This is
+            the screen an officer reads before deciding what to do next, and an amount shown
+            without saying whether it is owed yet is the one thing on this page with a legal
+            consequence.
+          */}
+          <div className="mt-1 text-xs">
+            {standing.kind === 'accruing' ? (
+              <span className="text-warning-700">
+                Accruing, not payable until {formatDate(standing.remedyEndsAt)}
+              </span>
+            ) : standing.kind === 'payable' ? (
+              <span className="text-gray-600">Payable</span>
+            ) : (
+              <span className="text-gray-500">Frozen; the case is closed</span>
+            )}
+          </div>
+          {c.penaltyRule?.label && (
+            <div className="mt-2 text-xs text-gray-500">Priced under {c.penaltyRule.label}</div>
+          )}
+        </div>
+      )}
+
+      {c.note && (
+        <div>
+          <h4 className="text-sm font-medium text-gray-900">Why the case was opened</h4>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600">{c.note}</p>
+        </div>
+      )}
+
+      {c.resolutionNote && (
+        <div>
+          <h4 className="text-sm font-medium text-gray-900">Outcome</h4>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600">{c.resolutionNote}</p>
+        </div>
+      )}
+
+      <EnforcementOrders case={c} currentUserId={currentUserId} canManage={canManage} />
+    </div>
   );
 }

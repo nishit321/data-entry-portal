@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react';
 import { strings } from '../lib/strings';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardCheck } from 'lucide-react';
+import { ClipboardCheck, Download } from 'lucide-react';
 import {
   Badge,
+  Button,
   Combobox,
   IconButton,
   FilterField,
@@ -18,9 +19,11 @@ import {
 import { DataTable, type Column, type Density } from '../components/DataTable';
 import { workflowApi, workflowKeys, type WorkflowQueueParams } from '../lib/workflow.api';
 import { useListParams } from '../hooks/useListParams';
+import { useCsvExport } from '../hooks/useCsvExport';
+import type { CsvColumn } from '../lib/csv';
 import { entityPicker, periodPicker, templatePicker } from '../lib/pickers';
 import { useAuth } from '../context/AuthContext';
-import { formatDate } from '../lib/format';
+import { formatDate, formatDateTime } from '../lib/format';
 import { REVIEW_STAGE_LABELS, REVIEW_STAGES, type SubmissionListRow } from '../lib/types';
 
 const LATE_FILTER_OPTIONS: SelectOption[] = [
@@ -116,6 +119,34 @@ export function ReviewQueuePage() {
     return chips;
   }, [list]);
 
+  /*
+   * The queue as a spreadsheet.
+   *
+   * Different from the submissions export in one way that matters: this list is a backlog, so the
+   * column somebody actually wants is **how long each return has been waiting**. It is on screen
+   * as a relative phrase, which is right for reading and useless for sorting, so the file carries
+   * the days as a number and the date it was filed beside it.
+   */
+  const exportCsv = useCsvExport({
+    subject: 'review-queue',
+    noun: 'returns',
+    fetchPage: (page, pageSize) => workflowApi.queue({ ...params, page, pageSize }),
+    columns: [
+      { header: 'Reference', value: (r) => r.referenceNumber ?? '' },
+      { header: 'Operator', value: (r) => r.entity.name },
+      { header: 'Period', value: (r) => r.period.label },
+      { header: 'Deadline', value: (r) => formatDate(r.period.dueDate) },
+      { header: 'Questionnaire', value: (r) => r.template.name },
+      {
+        header: 'Waiting at',
+        value: (r) => (r.reviewStage ? REVIEW_STAGE_LABELS[r.reviewStage] : ''),
+      },
+      { header: 'Filed on', value: (r) => (r.submittedAt ? formatDateTime(r.submittedAt) : '') },
+      { header: 'Days waiting', value: (r) => daysWaiting(r.submittedAt) ?? '' },
+      { header: 'Filed late', value: (r) => (r.isLate ? 'Yes' : 'No') },
+    ] satisfies CsvColumn<SubmissionListRow>[],
+  });
+
   const columns: Column<SubmissionListRow>[] = [
     {
       header: 'Reference',
@@ -199,6 +230,16 @@ export function ReviewQueuePage() {
             oldest !== null && oldest >= AGEING_DAYS ? (
               <Badge tone="warning">Oldest has waited {oldest} days</Badge>
             ) : undefined
+          }
+          actions={
+            <Button
+              variant="secondary"
+              icon={Download}
+              isLoading={exportCsv.isPending}
+              onClick={exportCsv.run}
+            >
+              Export
+            </Button>
           }
         />
       }

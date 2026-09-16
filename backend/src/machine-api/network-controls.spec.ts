@@ -1,5 +1,6 @@
 import {
   certificateMatches,
+  fingerprintFromHeader,
   ipAllowed,
   ipInCidr,
   isValidCidr,
@@ -165,5 +166,90 @@ describe('isValidCidr', () => {
     expect(isValidCidr('')).toBe(false);
     expect(isValidCidr('not-a-range')).toBe(false);
     expect(isValidCidr('999.0.0.1/24')).toBe(false);
+  });
+});
+
+describe('fingerprintFromHeader', () => {
+  /*
+   * Mutual TLS behind a proxy (NCA, 16 September 2026).
+   *
+   * The portal runs behind nginx, and nginx opens the HTTPS connection itself — so the client
+   * certificate never reaches the application on the socket. It has to arrive in a header, and
+   * this is what reads it.
+   *
+   * A throwaway self-signed certificate, generated once and pinned here with the SHA-256 of its
+   * own DER bytes, taken with openssl rather than with the code under test. A fixture whose
+   * expected value came from the implementation would agree with any implementation.
+   */
+  const CERT = `-----BEGIN CERTIFICATE-----
+MIIDYzCCAkugAwIBAgIUXcCsLenqBG8SJN3BOYVn4TaVr5gwDQYJKoZIhvcNAQEL
+BQAwQTEMMAoGA1UECgwDTkNBMQ0wCwYDVQQLDARURVNUMSIwIAYDVQQDDBlOQ0Eg
+UG9ydGFsIE1hY2hpbmUgQ2xpZW50MB4XDTI2MDkxNjA3MDUyM1oXDTQ2MDkxMTA3
+MDUyM1owQTEMMAoGA1UECgwDTkNBMQ0wCwYDVQQLDARURVNUMSIwIAYDVQQDDBlO
+Q0EgUG9ydGFsIE1hY2hpbmUgQ2xpZW50MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
+MIIBCgKCAQEAzSj504juZKjycbpKB0EIQs46XN1N/Z8CTA9EVMGHT4V23g8zz71Y
+Ip896tkw1L4yGfUyV/2QtBOKlhHLpKNN+8KmuPLnJqpJnPA218exfBSY/XUiJ+sX
+u8aldCzJwUmLqBIirWo4bBAzcsH8Fy/5G9Ym+P8pwmOmsFWyrwtaLqBTv38h+GxM
+G6wW/zPWAl/X6fH+/DMEMEW08nhDJSVjSwzz8Qbgr5G7uCsiYJ8oH4+DB2ak7KhX
+j2GKMc5fobx0q08n5BmKxBl8QDYk3f78ng1LWgL25bxu9LypP3Vaeb/in9u47z18
+cfmt4u1nruWyI6QkGFjh9sOeaUD5LhiyrQIDAQABo1MwUTAdBgNVHQ4EFgQULuyX
+oTPblS4VeWHkzkxQUDu+KzYwHwYDVR0jBBgwFoAULuyXoTPblS4VeWHkzkxQUDu+
+KzYwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAbd7FhkX94TRb
+tx/B50nM5psikya0OLmiu1RPG9xzW9iHkbXmhd7rTZnz6NgnDfNllUnoTOshWkHg
+YokJbFVP7Tl+NyJAt3SMixn15/MgVMhGai17JwdBe9Y0Okf1DWioo9Mzz4mDyi3U
+m1M2dnzmmzgTuAlcHVTun/BpbsOzqeOe647Xhp3sgnhGMUHLnEQxKmXn0sHsudOz
+/oqjV8qsJLMR8vXtDoIN2NYtbOdnswbjEPr1ESW4LgayK1d4be3VuM+cZQD+NHZR
+5HDaF4+i2v/zReUKHE2A41x2IynUt2KVWTW9U3NeEaXNQSaLhcDhG7C/wr/g+ZbZ
+/C1tIfj5LA==
+-----END CERTIFICATE-----
+`;
+
+  /** What `openssl x509 -outform DER | openssl dgst -sha256` says about the certificate above. */
+  const FINGERPRINT = '91636d8bf877f4f60cd32e709f4f3aee078d9eced54e288536cd39c69324c23a';
+
+  it('computes the fingerprint from a certificate the proxy forwarded', () => {
+    expect(fingerprintFromHeader(CERT)).toBe(FINGERPRINT);
+  });
+
+  it('reads the percent-encoded form nginx actually sends', () => {
+    // `$ssl_client_escaped_cert` is the PEM with its newlines encoded, because a header cannot
+    // carry them. This is the shape the live deployment will present, so it is the shape that
+    // matters most in this file.
+    expect(fingerprintFromHeader(encodeURIComponent(CERT))).toBe(FINGERPRINT);
+  });
+
+  it('accepts a fingerprint from a proxy that computed one itself', () => {
+    expect(fingerprintFromHeader(FINGERPRINT)).toBe(FINGERPRINT);
+    expect(fingerprintFromHeader(FINGERPRINT.toUpperCase())).toBe(FINGERPRINT);
+    expect(fingerprintFromHeader(`SHA256:${FINGERPRINT}`)).toBe(FINGERPRINT);
+  });
+
+  it('refuses a SHA-1 fingerprint rather than half-matching it', () => {
+    /*
+     * The trap this function exists to close. nginx's own `$ssl_client_fingerprint` is SHA-1, and
+     * a deployment that wired that up would send 40 hex characters where 64 are expected. Refusing
+     * it means the request is turned away; quietly accepting a prefix or a different hash would
+     * mean a certificate check that passes on the wrong certificate.
+     */
+    expect(fingerprintFromHeader('da39a3ee5e6b4b0d3255bfef95601890afd80709')).toBeNull();
+  });
+
+  it('refuses anything that is not a certificate', () => {
+    // All of these arrive from callers who have not authenticated yet, so the answer is null and a
+    // refused request, never an exception.
+    expect(fingerprintFromHeader('')).toBeNull();
+    expect(fingerprintFromHeader(undefined)).toBeNull();
+    expect(fingerprintFromHeader('hello')).toBeNull();
+    expect(fingerprintFromHeader('%E0%A4%A')).toBeNull(); // broken percent-encoding
+    expect(
+      fingerprintFromHeader('-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----'),
+    ).toBeNull();
+  });
+
+  it('gives a different certificate a different fingerprint', () => {
+    // Worth stating: the whole control rests on two certificates never agreeing. Built by moving
+    // one byte of the DER, which is the smallest change a forger could try.
+    const tampered = CERT.replace('MIIDYzCCAkug', 'MIIDYzCCAkuh');
+    expect(fingerprintFromHeader(tampered)).not.toBe(FINGERPRINT);
   });
 });

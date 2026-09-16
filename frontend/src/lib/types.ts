@@ -572,7 +572,17 @@ export interface EnforcementCase {
   penaltyAmount?: string | number | null;
   /** Days of continued default the amount rests on. */
   penaltyDays?: number;
+  /**
+   * When the amount became payable.
+   *
+   * Null while the thirty-day remedy period is still running. The figure is real and growing
+   * during that time; the operator simply does not owe it yet.
+   */
   penaltyAssessedAt?: string | null;
+  /** When the thirty days' notice the Act requires was issued. */
+  remedyNoticeAt?: string | null;
+  /** When that notice runs out. After this, an unremedied default becomes payable. */
+  remedyDueAt?: string | null;
   /** When the grace window closed and the contravention began. */
   defaultStartedAt?: string | null;
   /** When the missing return finally arrived. */
@@ -585,6 +595,68 @@ export interface EnforcementCase {
     dailyAmount: string | number;
     maxAmount: string | number | null;
   } | null;
+}
+
+/**
+ * Formal enforcement orders: the non-financial half of Tier 3 (NCA, 3 September 2026).
+ *
+ * A penalty is money. An order is a decision that stops an operator trading, and the difference
+ * runs through everything below: an order has a legal basis, an effective date, a person who
+ * drafted it and a different person who approved it. None of that is optional, because an order
+ * that cannot say what it rests on is not one an operator can answer.
+ */
+export const ENFORCEMENT_ORDER_TYPES = [
+  'SUSPENSION_FULL',
+  'SUSPENSION_PARTIAL',
+  'CANCELLATION',
+  'LICENCE_SHORTENING',
+] as const;
+export type EnforcementOrderType = (typeof ENFORCEMENT_ORDER_TYPES)[number];
+
+export const ENFORCEMENT_ORDER_TYPE_LABELS: Record<EnforcementOrderType, string> = {
+  SUSPENSION_FULL: 'Full suspension',
+  SUSPENSION_PARTIAL: 'Partial suspension',
+  CANCELLATION: 'Cancellation',
+  LICENCE_SHORTENING: 'Licence shortening',
+};
+
+/** What each kind actually does, for the officer choosing between them. */
+export const ENFORCEMENT_ORDER_TYPE_HINTS: Record<EnforcementOrderType, string> = {
+  SUSPENSION_FULL: 'The operator stops trading for a stated period.',
+  SUSPENSION_PARTIAL: 'One service or area stops. Say which in the reason.',
+  CANCELLATION: 'The licence ends. This does not run for a period, and the Board must approve it.',
+  LICENCE_SHORTENING: 'The licence term is cut short.',
+};
+
+export const ENFORCEMENT_ORDER_STATUSES = ['DRAFT', 'APPROVED', 'REVOKED'] as const;
+export type EnforcementOrderStatus = (typeof ENFORCEMENT_ORDER_STATUSES)[number];
+
+export const ENFORCEMENT_ORDER_STATUS_LABELS: Record<EnforcementOrderStatus, string> = {
+  DRAFT: 'Draft',
+  APPROVED: 'In force',
+  REVOKED: 'Withdrawn',
+};
+
+export interface EnforcementOrder {
+  id: string;
+  caseId: string;
+  type: EnforcementOrderType;
+  status: EnforcementOrderStatus;
+  reason: string;
+  legalBasis: string;
+  effectiveFrom: string;
+  /** How long it runs, in days. Null on a cancellation, which does not end. */
+  durationDays: number | null;
+  /** The Board minute that authorised a cancellation, and the day it was taken. */
+  boardMinuteRef: string | null;
+  boardDecidedAt: string | null;
+  approvedAt: string | null;
+  revokedAt: string | null;
+  revokedNote: string | null;
+  createdAt: string;
+  draftedBy: { id: string; firstName: string; lastName: string } | null;
+  approvedBy: { id: string; firstName: string; lastName: string } | null;
+  revokedBy: { id: string; firstName: string; lastName: string } | null;
 }
 
 /** One line of NCA Legal's penalty schedule (Q3). Amounts are configuration, not code. */

@@ -8,6 +8,7 @@ import { Pencil, Power, ShieldOff, Trash2, UserPlus } from 'lucide-react';
 import {
   Alert,
   Badge,
+  BulkBar,
   Button,
   Combobox,
   FilterField,
@@ -447,20 +448,14 @@ export function UsersPage() {
       onDensityChange={setDensity}
       selectionBar={
         selected.size > 0 ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
-            <span className="text-sm font-medium text-brand-800">{selected.size} selected</span>
-            <div className="ms-auto flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setPendingBulk('activate')}>
-                Activate
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setPendingBulk('deactivate')}>
-                Deactivate
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setSelected(new Set())}>
-                Clear
-              </Button>
-            </div>
-          </div>
+          <BulkBar count={selected.size} noun="account" onClear={() => setSelected(new Set())}>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('activate')}>
+              Activate
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('deactivate')}>
+              Deactivate
+            </Button>
+          </BulkBar>
         ) : undefined
       }
     >

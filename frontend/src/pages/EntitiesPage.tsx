@@ -10,6 +10,7 @@ import {
   Alert,
   Badge,
   Button,
+  BulkBar,
   ConfirmDialog,
   DatePicker,
   DescriptionList,
@@ -217,6 +218,45 @@ export function EntitiesPage() {
 
   const rows = listQuery.data?.data ?? [];
 
+  /*
+   * Suspending or restoring several operators at once.
+   *
+   * Only these two, and the omission is the point. `EntityStatus` also has PENDING and
+   * DEREGISTERED, and neither belongs on a bar that acts on everything ticked: deregistering ends
+   * an operator's relationship with the Authority and is not a thing to do to twelve rows because
+   * a checkbox was already ticked, and moving somebody back to PENDING is not a real transition.
+   * Both stay on the single-entity form, where there is one name in front of you.
+   */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pendingBulk, setPendingBulk] = useState<'ACTIVE' | 'SUSPENDED' | null>(null);
+  const selectedEntities = rows.filter((e) => selected.has(e.id));
+
+  const bulkMutation = useMutation({
+    mutationFn: async (status: 'ACTIVE' | 'SUSPENDED') => {
+      // Only the ones that would actually move. A status change writes its own audit entry, and a
+      // no-op transition puts a line in the trail saying something happened that did not.
+      const changing = selectedEntities.filter((e) => e.status !== status);
+      await Promise.all(changing.map((e) => entitiesApi.setStatus(e.id, status)));
+      return changing.length;
+    },
+    onSuccess: (count, status) => {
+      void qc.invalidateQueries({ queryKey: entityKeys.all });
+      setSelected(new Set());
+      setPendingBulk(null);
+      toast.success(
+        count === 0
+          ? 'Nothing to change: every operator selected was already in that state.'
+          : `${count} ${count === 1 ? 'operator' : 'operators'} ${
+              status === 'ACTIVE' ? 'activated' : 'suspended'
+            }.`,
+      );
+    },
+    onError: (err) => {
+      setPendingBulk(null);
+      toast.error(getErrorMessage(err, "We couldn't update every operator"));
+    },
+  });
+
   const columns: Column<EntityListRow>[] = [
     {
       header: 'Name',
@@ -319,6 +359,18 @@ export function EntitiesPage() {
       onPageSizeChange={list.setPageSize}
       refreshing={listQuery.isFetching && !listQuery.isLoading}
       onDensityChange={setDensity}
+      selectionBar={
+        selected.size > 0 ? (
+          <BulkBar count={selected.size} noun="operator" onClear={() => setSelected(new Set())}>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('ACTIVE')}>
+              Activate
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('SUSPENDED')}>
+              Suspend
+            </Button>
+          </BulkBar>
+        ) : undefined
+      }
       footnote={
         <p className="flex items-center gap-1.5 text-xs text-gray-500">
           <Building2 size={13} aria-hidden /> Entities keep data separate. Operator users only see
@@ -338,6 +390,9 @@ export function EntitiesPage() {
         order={list.order}
         onSortChange={list.setSort}
         density={density}
+        selectable
+        selectedKeys={selected}
+        onSelectionChange={setSelected}
         emptyMessage={
           list.hasActiveFilters
             ? 'No entities match your filters.'
@@ -568,6 +623,28 @@ export function EntitiesPage() {
         isLoading={deleteMutation.isPending}
         onConfirm={() => confirming && deleteMutation.mutate(confirming.id)}
         onClose={() => setConfirming(null)}
+      />
+
+      {/*
+        Suspension is named for what it does, not for the status it sets.
+        An administrator ticking twelve rows is entitled to know that the people behind them stop
+        being able to file, before pressing the button rather than after the first phone call.
+      */}
+      <ConfirmDialog
+        open={pendingBulk !== null}
+        title={pendingBulk === 'ACTIVE' ? 'Activate these operators?' : 'Suspend these operators?'}
+        message={
+          pendingBulk === 'ACTIVE'
+            ? `${selected.size} selected. Any that are already active stay as they are.`
+            : `${selected.size} selected. A suspended operator cannot file returns or sign in to work on one.`
+        }
+        confirmLabel={pendingBulk === 'ACTIVE' ? 'Activate' : 'Suspend'}
+        tone={pendingBulk === 'SUSPENDED' ? 'danger' : 'primary'}
+        isLoading={bulkMutation.isPending}
+        onConfirm={() => {
+          if (pendingBulk) bulkMutation.mutate(pendingBulk);
+        }}
+        onClose={() => setPendingBulk(null)}
       />
     </ListShell>
   );

@@ -34,7 +34,7 @@ export const governanceTemplates: TemplateDef[] = [
             key: 'complaints_resolved',
             label: 'Complaints resolved',
             dataType: 'INTEGER',
-            description: 'Complaints closed to the consumer’s satisfaction during the period.',
+            description: "Complaints closed to the consumer's satisfaction during the period.",
             isMandatory: true,
             flowOrStock: 'FLOW_ENTERED',
             minValue: 0,
