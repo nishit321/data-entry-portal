@@ -4,6 +4,11 @@ node_modules/
 # Build output
 dist/
 build/
+# deploy/release.sh builds the site beside the live one and swaps it in, keeping one
+# previous build for a quick manual rollback. Both are build output like dist/ itself,
+# and untracked they would trip the deployment's own clean-tree check.
+dist.new/
+dist.prev/
 
 # Test artefacts
 coverage/
