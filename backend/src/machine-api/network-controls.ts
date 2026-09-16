@@ -1,3 +1,4 @@
+import { createHash, X509Certificate } from 'crypto';
 import { isIP } from 'net';
 
 /**
@@ -148,6 +149,60 @@ export function normaliseFingerprint(value: string | undefined | null): string |
     .replace(/^sha-?256[:=]/, '')
     .replace(/[:\s]/g, '');
   return /^[0-9a-f]{64}$/.test(cleaned) ? cleaned : null;
+}
+
+/**
+ * The fingerprint of whatever a trusted proxy forwarded in its client-certificate header.
+ *
+ * Needed because of where TLS is terminated. The portal runs behind nginx, and nginx opens the
+ * HTTPS connection itself — so by the time a request reaches the application the client
+ * certificate is long gone, and the socket has nothing to show. The proxy has to pass it on, and
+ * this reads what it passed.
+ *
+ * Two shapes are accepted, and the second is the one to prefer:
+ *
+ *  - **A SHA-256 fingerprint**, 64 hex characters, from a proxy that computed one itself.
+ *  - **The certificate**, as PEM. nginx sends this as `$ssl_client_escaped_cert`, which is the PEM
+ *    percent-encoded so it survives a header. The fingerprint is then computed here, from the
+ *    certificate's own bytes, by exactly the same line the direct-TLS path uses.
+ *
+ * Preferring the certificate is not a style choice. A proxy that sends a fingerprint is asking the
+ * application to trust its arithmetic and its choice of hash — and nginx's own
+ * `$ssl_client_fingerprint` is SHA-1, which would never match a SHA-256 fingerprint on a
+ * credential and would fail in a way that looks like a wrong certificate rather than a wrong
+ * setting. A proxy that forwards the certificate is just a pipe, and the one definition of
+ * "fingerprint" stays in one place.
+ *
+ * Returns null for anything it cannot read, which the caller treats as "no certificate presented".
+ * Not throwing is deliberate: a malformed header is an unauthenticated caller's input, and the
+ * answer to it is a refused request, not a stack trace.
+ */
+export function fingerprintFromHeader(value: string | undefined | null): string | null {
+  if (!value) return null;
+
+  // A proxy that did the work itself. Checked first because it is unambiguous: 64 hex characters
+  // are not a certificate.
+  const asFingerprint = normaliseFingerprint(value);
+  if (asFingerprint !== null) return asFingerprint;
+
+  // nginx percent-encodes the PEM so that its newlines survive being put in a header.
+  let pem = value.trim();
+  if (pem.includes('%')) {
+    try {
+      pem = decodeURIComponent(pem);
+    } catch {
+      // A header that is not valid percent-encoding is not a certificate either.
+      return null;
+    }
+  }
+  if (!pem.includes('BEGIN CERTIFICATE')) return null;
+
+  try {
+    // `.raw` is the DER the certificate was signed over, which is what a fingerprint is taken of.
+    return createHash('sha256').update(new X509Certificate(pem).raw).digest('hex');
+  } catch {
+    return null;
+  }
 }
 
 /** Whether the certificate presented is the one this credential is bound to. */

@@ -32,19 +32,40 @@ jobs:
       url: https://data.nca.gov.ss
     steps:
       - name: Install the deploy key
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
+          set -euo pipefail
+
+          # A missing secret is the likeliest reason this step fails, and an empty
+          # one fails several commands later in ways that read like something else.
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Repository secret $name is not set."
+              exit 1
+            fi
+          done
+
           mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Nothing is silenced here. If the host is unreachable — most often port 22
+          # closed to the runner in the AWS security group — this is where it shows.
+          ssh-keyscan -T 15 "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          echo "Host keys collected: $(wc -l < ~/.ssh/known_hosts)"
 
       - name: Release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          REF: ${{ inputs.ref || 'main' }}
         # The key is restricted on the server to one command, so this argument is
         # read as the ref to release and nothing else can be run with it.
         run: |
-          ssh -i ~/.ssh/id_deploy -o BatchMode=yes \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-            "${{ inputs.ref || 'main' }}"
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "$REF"
 
       - name: Confirm the site is answering
         run: |

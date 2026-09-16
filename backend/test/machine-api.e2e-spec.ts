@@ -21,6 +21,40 @@ jest.setTimeout(60000);
 const OTP = '123456';
 
 /**
+ * A throwaway client certificate, generated once and pinned here.
+ *
+ * Its own rather than borrowed from the signatures suite, for the reason that suite gives about
+ * its own: these run four at a time against one database, and a shared certificate fixture would
+ * collide on the unique fingerprint whenever two of them overlapped. Self-signed, valid to 2046,
+ * and it signs nothing — what is under test is whether the portal recognises it.
+ */
+const CLIENT_CERT_PEM = `-----BEGIN CERTIFICATE-----
+MIIDYzCCAkugAwIBAgIUXcCsLenqBG8SJN3BOYVn4TaVr5gwDQYJKoZIhvcNAQEL
+BQAwQTEMMAoGA1UECgwDTkNBMQ0wCwYDVQQLDARURVNUMSIwIAYDVQQDDBlOQ0Eg
+UG9ydGFsIE1hY2hpbmUgQ2xpZW50MB4XDTI2MDkxNjA3MDUyM1oXDTQ2MDkxMTA3
+MDUyM1owQTEMMAoGA1UECgwDTkNBMQ0wCwYDVQQLDARURVNUMSIwIAYDVQQDDBlO
+Q0EgUG9ydGFsIE1hY2hpbmUgQ2xpZW50MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
+MIIBCgKCAQEAzSj504juZKjycbpKB0EIQs46XN1N/Z8CTA9EVMGHT4V23g8zz71Y
+Ip896tkw1L4yGfUyV/2QtBOKlhHLpKNN+8KmuPLnJqpJnPA218exfBSY/XUiJ+sX
+u8aldCzJwUmLqBIirWo4bBAzcsH8Fy/5G9Ym+P8pwmOmsFWyrwtaLqBTv38h+GxM
+G6wW/zPWAl/X6fH+/DMEMEW08nhDJSVjSwzz8Qbgr5G7uCsiYJ8oH4+DB2ak7KhX
+j2GKMc5fobx0q08n5BmKxBl8QDYk3f78ng1LWgL25bxu9LypP3Vaeb/in9u47z18
+cfmt4u1nruWyI6QkGFjh9sOeaUD5LhiyrQIDAQABo1MwUTAdBgNVHQ4EFgQULuyX
+oTPblS4VeWHkzkxQUDu+KzYwHwYDVR0jBBgwFoAULuyXoTPblS4VeWHkzkxQUDu+
+KzYwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAbd7FhkX94TRb
+tx/B50nM5psikya0OLmiu1RPG9xzW9iHkbXmhd7rTZnz6NgnDfNllUnoTOshWkHg
+YokJbFVP7Tl+NyJAt3SMixn15/MgVMhGai17JwdBe9Y0Okf1DWioo9Mzz4mDyi3U
+m1M2dnzmmzgTuAlcHVTun/BpbsOzqeOe647Xhp3sgnhGMUHLnEQxKmXn0sHsudOz
+/oqjV8qsJLMR8vXtDoIN2NYtbOdnswbjEPr1ESW4LgayK1d4be3VuM+cZQD+NHZR
+5HDaF4+i2v/zReUKHE2A41x2IynUt2KVWTW9U3NeEaXNQSaLhcDhG7C/wr/g+ZbZ
+/C1tIfj5LA==
+-----END CERTIFICATE-----
+`;
+
+/** `openssl x509 -outform DER | openssl dgst -sha256` over the certificate above. */
+const CLIENT_CERT_FINGERPRINT = '91636d8bf877f4f60cd32e709f4f3aee078d9eced54e288536cd39c69324c23a';
+
+/**
  * The system-to-system API (Q10, Phase 3).
  *
  * Most of this suite is about the controls rather than the happy path: an unsigned request, a
@@ -511,6 +545,48 @@ describe('Machine API (e2e)', () => {
         .set(auth(opAToken))
         .send({ certFingerprint: '' })
         .expect(200);
+      await call('get', '/machine/whoami').expect(200);
+    });
+
+    it('ignores a certificate header while no header name is configured', async () => {
+      /*
+       * The security property the whole setting rests on (NCA, 16 September 2026).
+       *
+       * Reading a client-certificate header unconditionally would be worse than not checking
+       * certificates at all: anyone could set the header themselves and claim any certificate. So
+       * the header is honoured only when `MACHINE_CLIENT_CERT_HEADER` names it, and this app was
+       * booted without that setting.
+       *
+       * The credential below is bound to a certificate, and the request presents the correct one
+       * in the header a configured deployment would use. It must still be refused, because this
+       * deployment was never told to believe that header.
+       */
+      await request(server)
+        .patch(`/api/v1/api-clients/${credentialRowId}`)
+        .set(auth(opAToken))
+        .send({ certFingerprint: CLIENT_CERT_FINGERPRINT })
+        .expect(200);
+
+      try {
+        const res = await call('get', '/machine/whoami', {
+          headers: { 'x-ssl-client-cert': encodeURIComponent(CLIENT_CERT_PEM) },
+        }).expect(403);
+        expect(res.body.message).toContain('client certificate');
+      } finally {
+        /*
+         * Unbound whatever happened above.
+         *
+         * Every test after this one files with the same credential, so leaving it bound to a
+         * certificate turns one honest failure into a dozen misleading ones. Found exactly that
+         * way: breaking the guard on purpose to check this test could fail took eleven others down
+         * with it, and the real cause was three screens up.
+         */
+        await request(server)
+          .patch(`/api/v1/api-clients/${credentialRowId}`)
+          .set(auth(opAToken))
+          .send({ certFingerprint: '' })
+          .expect(200);
+      }
       await call('get', '/machine/whoami').expect(200);
     });
 

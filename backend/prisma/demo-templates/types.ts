@@ -28,6 +28,17 @@ export interface FieldDef {
   referenceCategory?: ReferenceCategory;
   allowsOther?: boolean;
   frequencyOverride?: ReportingFrequency;
+  /**
+   * The revenue figure the levy is assessed on.
+   *
+   * Exactly one field on a questionnaire should carry it. Four parts of the portal read it and
+   * none of them can guess: the levy assessment has nothing to compute from without it, the
+   * enforcement engine cannot price a percentage-of-revenue penalty, benchmarking cannot rank
+   * anyone, and the public allowlist refuses it outright because it is the figure Q4 names as
+   * commercially sensitive. A questionnaire with none set is one where the levy screen reports
+   * that no basis is marked, for every period, forever.
+   */
+  isLevyBasis?: boolean;
 }
 
 export interface SectionDef {

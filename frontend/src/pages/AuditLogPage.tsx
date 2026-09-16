@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Download, ScrollText } from 'lucide-react';
 import {
   Badge,
@@ -13,7 +13,6 @@ import {
   PageHeader,
   RelativeTime,
   Select,
-  useToast,
   type ActiveFilterChip,
   type SelectOption,
 } from '../components/ui';
@@ -21,9 +20,9 @@ import { DataTable, type Column, type Density } from '../components/DataTable';
 import { auditApi, auditKeys, type AuditListParams } from '../lib/audit.api';
 import { useListParams } from '../hooks/useListParams';
 import { userPicker } from '../lib/pickers';
-import { collectForExport, downloadCsv, exportFilename, toCsv } from '../lib/csv';
+import type { CsvColumn } from '../lib/csv';
+import { useCsvExport } from '../hooks/useCsvExport';
 import { describeDevice, formatDateTime, humaniseKey } from '../lib/format';
-import { getErrorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import {
   AUDIT_ACTIONS,
@@ -74,7 +73,6 @@ function actorName(row: AuditLogRow): string {
 
 export function AuditLogPage() {
   const { user } = useAuth();
-  const toast = useToast();
   // The users list is Admin-only, so the actor picker is offered to Admins; other
   // Authority roles still get the action, entity-type, and date filters.
   const isAdmin = user?.role === 'ADMIN';
@@ -106,38 +104,24 @@ export function AuditLogPage() {
     queryFn: () => auditApi.list(params),
   });
 
-  const exportMutation = useMutation({
-    mutationFn: async () => {
-      const { rows: all, truncated } = await collectForExport<AuditLogRow>((page, pageSize) =>
-        auditApi.list({ ...params, page, pageSize }),
-      );
-      downloadCsv(
-        exportFilename('audit-log'),
-        toCsv(all, [
-          { header: 'When', value: (r) => formatDateTime(r.createdAt) },
-          { header: 'Actor', value: (r) => actorName(r) },
-          { header: 'Actor email', value: (r) => r.actor?.email ?? '' },
-          { header: 'Actor role', value: (r) => (r.actor ? ROLE_LABELS[r.actor.role] : '') },
-          { header: 'Action', value: (r) => AUDIT_ACTION_LABELS[r.action] ?? r.action },
-          {
-            header: 'Record type',
-            value: (r) => (r.entityType ? (ENTITY_TYPE_LABEL[r.entityType] ?? r.entityType) : ''),
-          },
-          { header: 'Record', value: (r) => r.target ?? '' },
-          { header: 'Record id', value: (r) => r.entityId ?? '' },
-          { header: 'IP address', value: (r) => r.ipAddress ?? '' },
-          { header: 'Request id', value: (r) => r.requestId ?? '' },
-        ]),
-      );
-      return { count: all.length, truncated };
-    },
-    onSuccess: ({ count, truncated }) =>
-      truncated
-        ? toast.warning(
-            `Exported the first ${count.toLocaleString()} records. Narrow the filters to get the rest.`,
-          )
-        : toast.success(`Exported ${count.toLocaleString()} records.`),
-    onError: (err) => toast.error(getErrorMessage(err, "We couldn't build the export")),
+  const exportCsv = useCsvExport({
+    subject: 'audit-log',
+    fetchPage: (page, pageSize) => auditApi.list({ ...params, page, pageSize }),
+    columns: [
+      { header: 'When', value: (r) => formatDateTime(r.createdAt) },
+      { header: 'Actor', value: (r) => actorName(r) },
+      { header: 'Actor email', value: (r) => r.actor?.email ?? '' },
+      { header: 'Actor role', value: (r) => (r.actor ? ROLE_LABELS[r.actor.role] : '') },
+      { header: 'Action', value: (r) => AUDIT_ACTION_LABELS[r.action] ?? r.action },
+      {
+        header: 'Record type',
+        value: (r) => (r.entityType ? (ENTITY_TYPE_LABEL[r.entityType] ?? r.entityType) : ''),
+      },
+      { header: 'Record', value: (r) => r.target ?? '' },
+      { header: 'Record id', value: (r) => r.entityId ?? '' },
+      { header: 'IP address', value: (r) => r.ipAddress ?? '' },
+      { header: 'Request id', value: (r) => r.requestId ?? '' },
+    ] satisfies CsvColumn<AuditLogRow>[],
   });
 
   const rows = listQuery.data?.data ?? [];
@@ -269,8 +253,8 @@ export function AuditLogPage() {
         <Button
           variant="secondary"
           icon={Download}
-          isLoading={exportMutation.isPending}
-          onClick={() => exportMutation.mutate()}
+          isLoading={exportCsv.isPending}
+          onClick={exportCsv.run}
           disabled={rows.length === 0}
         >
           Export

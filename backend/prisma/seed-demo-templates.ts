@@ -91,6 +91,7 @@ async function run() {
                 maxValue: f.maxValue,
                 referenceCategory: f.referenceCategory,
                 allowsOther: f.allowsOther ?? false,
+                isLevyBasis: f.isLevyBasis ?? false,
                 frequencyOverride: f.frequencyOverride,
               })),
             },
@@ -110,7 +111,7 @@ async function run() {
     created += 1;
     const fieldCount = t.sections.reduce((n, s) => n + s.fields.length, 0);
     console.log(
-      `created: ${t.name} — ${t.sections.length} sections, ${fieldCount} fields, ${(t.rules ?? []).length} rules`,
+      `created: ${t.name}: ${t.sections.length} sections, ${fieldCount} fields, ${(t.rules ?? []).length} rules`,
     );
   }
 

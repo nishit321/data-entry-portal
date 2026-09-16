@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { strings } from '../lib/strings';
+import { HOUR_OPTIONS, formatHour } from '../lib/schedule-options';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Mail, Plus, Send, Trash2, X } from 'lucide-react';
 import {
@@ -48,10 +49,6 @@ const KIND_OPTIONS = SCHEDULED_REPORT_KINDS.map((k) => ({
 const FREQUENCY_OPTIONS = REPORT_FREQUENCIES.map((f) => ({
   value: f,
   label: REPORT_FREQUENCY_LABELS[f],
-}));
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
-  value: String(i),
-  label: `${String(i).padStart(2, '0')}:00`,
 }));
 const COVERAGE_OPTIONS = REPORT_COVERAGES.map((c) => ({
   value: c,
@@ -115,7 +112,7 @@ const BLANK = {
 
 /** When a schedule next goes out, in the words an administrator used to set it up. */
 function timetable(schedule: ReportSchedule): string {
-  const time = `${String(schedule.hour).padStart(2, '0')}:00`;
+  const time = formatHour(schedule.hour);
   if (schedule.frequency === 'WEEKLY') {
     return `Every ${WEEKDAY_LABELS[schedule.dayOfPeriod - 1] ?? 'Monday'} at ${time}`;
   }

@@ -20,6 +20,7 @@ import { API_SCOPES_KEY } from './machine.decorators';
 import {
   certificateMatches,
   ipAllowed,
+  fingerprintFromHeader,
   normaliseFingerprint,
   normaliseIp,
 } from './network-controls';
@@ -243,6 +244,13 @@ export class MachineAuthGuard implements CanActivate {
    * application (Q5: on-premise, cloud, or hybrid). The proxy header is honoured **only** when a
    * trusted-proxy header name has been configured — an unconditional header read would let anyone
    * claim any certificate simply by setting it.
+   *
+   * The live deployment is the proxy case: nginx terminates TLS, so the socket below has no peer
+   * certificate to offer and the header is the only way the certificate reaches here at all. What
+   * makes that header trustworthy is not this code but the nginx configuration, which *sets* it on
+   * every proxied request and so overwrites anything a caller sent under the same name. That pair
+   * has to stay together: turning this on without that line in nginx would let any caller name any
+   * certificate. `docs/DEPLOYMENT.md` §8 carries the configuration and says so.
    */
   private presentedCertificate(request: MachineRequest): string | null {
     const socket = request.socket as TLSSocket;
@@ -258,7 +266,7 @@ export class MachineAuthGuard implements CanActivate {
 
     const headerName = this.config.clientCertHeader;
     if (headerName) {
-      return normaliseFingerprint(this.header(request, headerName.toLowerCase()));
+      return fingerprintFromHeader(this.header(request, headerName.toLowerCase()));
     }
     return null;
   }

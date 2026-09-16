@@ -11,6 +11,7 @@ import {
   Button,
   Combobox,
   FilterField,
+  BulkBar,
   ConfirmDialog,
   DescriptionList,
   FormField,
@@ -201,6 +202,45 @@ export function AgentsPage() {
 
   const rows = listQuery.data?.data ?? [];
 
+  /*
+   * Selecting several agents and switching them at once.
+   *
+   * An agent register is the longest list in the portal, and taking a region's agents offline
+   * after a licence change is a real task. One power button at a time down a paginated list is
+   * where the mistakes happen: the page moves under you, and nobody can say afterwards which rows
+   * were meant.
+   */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pendingBulk, setPendingBulk] = useState<'activate' | 'deactivate' | null>(null);
+  const selectedAgents = rows.filter((a) => selected.has(a.id));
+
+  const bulkMutation = useMutation({
+    mutationFn: async (action: 'activate' | 'deactivate') => {
+      const isActive = action === 'activate';
+      // Only the ones that would actually change. Sending a no-op for every already-active agent
+      // writes an audit entry saying somebody activated something that was already on.
+      const changing = selectedAgents.filter((a) => a.isActive !== isActive);
+      await Promise.all(changing.map((a) => agentsApi.update(a.id, { isActive })));
+      return changing.length;
+    },
+    onSuccess: (count, action) => {
+      void qc.invalidateQueries({ queryKey: agentKeys.all });
+      setSelected(new Set());
+      setPendingBulk(null);
+      toast.success(
+        count === 0
+          ? 'Nothing to change: every agent selected was already in that state.'
+          : `${count} ${count === 1 ? 'agent' : 'agents'} ${
+              action === 'activate' ? 'activated' : 'deactivated'
+            }.`,
+      );
+    },
+    onError: (err) => {
+      setPendingBulk(null);
+      toast.error(getErrorMessage(err, "We couldn't update every agent"));
+    },
+  });
+
   const columns: Column<Agent>[] = [
     {
       header: 'Reference',
@@ -313,6 +353,18 @@ export function AgentsPage() {
       onPageSizeChange={list.setPageSize}
       refreshing={listQuery.isFetching && !listQuery.isLoading}
       onDensityChange={setDensity}
+      selectionBar={
+        selected.size > 0 ? (
+          <BulkBar count={selected.size} noun="agent" onClear={() => setSelected(new Set())}>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('activate')}>
+              Activate
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('deactivate')}>
+              Deactivate
+            </Button>
+          </BulkBar>
+        ) : undefined
+      }
       footnote={
         <p className="flex items-center gap-1.5 text-xs text-gray-500">
           <Store size={13} aria-hidden />{' '}
@@ -334,6 +386,11 @@ export function AgentsPage() {
         order={list.order}
         onSortChange={list.setSort}
         density={density}
+        // Selection is offered only to somebody who could act on the rows anyway. A checkbox that
+        // leads to no action is a control that wastes a reader's time working out why.
+        selectable={canWrite}
+        selectedKeys={selected}
+        onSelectionChange={setSelected}
         onRowClick={(a) => setViewing(a)}
         activeRowKey={viewing?.id}
         emptyMessage={
@@ -518,6 +575,28 @@ export function AgentsPage() {
         isLoading={deleteMutation.isPending}
         onConfirm={() => confirming && deleteMutation.mutate(confirming.id)}
         onClose={() => setConfirming(null)}
+      />
+
+      {/*
+        Confirmed rather than done on the click.
+        The bar acts on everything ticked, which may run past the edge of the page, so the count is
+        repeated here where somebody reads it before committing.
+      */}
+      <ConfirmDialog
+        open={pendingBulk !== null}
+        title={pendingBulk === 'activate' ? 'Activate these agents?' : 'Deactivate these agents?'}
+        message={
+          pendingBulk === 'activate'
+            ? `${selected.size} selected. Any that are already active stay as they are.`
+            : `${selected.size} selected. A deactivated agent stops appearing as a place to transact.`
+        }
+        confirmLabel={pendingBulk === 'activate' ? 'Activate' : 'Deactivate'}
+        tone={pendingBulk === 'deactivate' ? 'danger' : 'primary'}
+        isLoading={bulkMutation.isPending}
+        onConfirm={() => {
+          if (pendingBulk) bulkMutation.mutate(pendingBulk);
+        }}
+        onClose={() => setPendingBulk(null)}
       />
     </ListShell>
   );

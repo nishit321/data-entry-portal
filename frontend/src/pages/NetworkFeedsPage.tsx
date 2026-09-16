@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { strings } from '../lib/strings';
+import { HOUR_OPTIONS, formatHour } from '../lib/schedule-options';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Antenna, FileSignature, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import {
@@ -54,10 +55,6 @@ const FREQUENCY_OPTIONS = FEED_FREQUENCIES.map((f) => ({
   label: FEED_FREQUENCY_LABELS[f],
 }));
 const WEEKDAY_OPTIONS = WEEKDAY_LABELS.map((label, i) => ({ value: String(i + 1), label }));
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => ({
-  value: String(i),
-  label: `${String(i).padStart(2, '0')}:00`,
-}));
 
 const BLANK_AGREEMENT = {
   entityId: '',
@@ -88,7 +85,7 @@ const OUTCOME_TONE: Record<FeedRunOutcome, 'success' | 'danger' | 'gray'> = {
 
 /** How often a feed runs, in the words it was set up with. */
 function timetable(feed: NetworkFeed): string {
-  const time = `${String(feed.hour).padStart(2, '0')}:00`;
+  const time = formatHour(feed.hour);
   if (feed.frequency === 'HOURLY') return 'Every hour';
   if (feed.frequency === 'WEEKLY') {
     return `Every ${WEEKDAY_LABELS[feed.dayOfWeek - 1] ?? 'Monday'} at ${time}`;

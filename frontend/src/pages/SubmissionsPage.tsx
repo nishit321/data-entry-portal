@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { strings } from '../lib/strings';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ClipboardList, Download, Eye, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -26,12 +26,15 @@ import {
 import { DataTable, type Column, type Density } from '../components/DataTable';
 import { submissionsApi, submissionKeys, type SubmissionListParams } from '../lib/submissions.api';
 import { useListParams } from '../hooks/useListParams';
+import { useCsvExport } from '../hooks/useCsvExport';
+import type { CsvColumn } from '../lib/csv';
 import { entityPicker, periodPicker, templatePicker } from '../lib/pickers';
 import { getErrorMessage } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { SUBMISSION_STATUS_TONE } from '../lib/status';
-import { formatDate, joinMeta } from '../lib/format';
+import { formatDate, formatDateTime, joinMeta } from '../lib/format';
 import {
+  ENTITY_TYPE_LABELS,
   isOperatorRole,
   REVIEW_STAGE_LABELS,
   SUBMISSION_STATUS_LABELS,
@@ -200,6 +203,41 @@ export function SubmissionsPage() {
     return chips;
   }, [list]);
 
+  /*
+   * The filtered list, as a spreadsheet.
+   *
+   * A regulator reconciles this data offline: against last quarter's file, against a letter from
+   * an operator, against a figure somebody quoted in a meeting. "Read it off the screen" is not a
+   * workflow, and it is why FRONTEND_STANDARDS §3.11 asks for this at all.
+   *
+   * The columns are the ones on screen plus the two a spreadsheet needs and a table does not: the
+   * reference number, which is what an operator quotes back, and how many answers a return
+   * carries, which is how an empty draft is told from a filled one without opening it.
+   */
+  const exportCsv = useCsvExport({
+    subject: 'submissions',
+    noun: 'returns',
+    fetchPage: (page, pageSize) => submissionsApi.list({ ...params, page, pageSize }),
+    columns: [
+      { header: 'Reference', value: (r) => r.referenceNumber ?? '' },
+      { header: 'Operator', value: (r) => r.entity.name },
+      { header: 'Operator type', value: (r) => ENTITY_TYPE_LABELS[r.entity.type] },
+      { header: 'Period', value: (r) => r.period.label },
+      { header: 'Deadline', value: (r) => formatDate(r.period.dueDate) },
+      { header: 'Questionnaire', value: (r) => r.template.name },
+      { header: 'Status', value: (r) => SUBMISSION_STATUS_LABELS[r.status] },
+      {
+        header: 'Review stage',
+        value: (r) => (r.reviewStage ? REVIEW_STAGE_LABELS[r.reviewStage] : ''),
+      },
+      // Yes or no rather than TRUE/FALSE: a spreadsheet column of booleans reads as a setting,
+      // and this is a fact about a filing.
+      { header: 'Filed late', value: (r) => (r.isLate ? 'Yes' : 'No') },
+      { header: 'Filed on', value: (r) => (r.submittedAt ? formatDateTime(r.submittedAt) : '') },
+      { header: 'Answers', value: (r) => r._count.values },
+    ] satisfies CsvColumn<SubmissionListRow>[],
+  });
+
   const columns: Column<SubmissionListRow>[] = [
     {
       header: 'Reference',
@@ -303,11 +341,21 @@ export function SubmissionsPage() {
           <PageHeader
             description="Fill in a questionnaire for a reporting period, then submit your return to the Authority."
             actions={
-              userIsOperator ? (
-                <Button onClick={openStart} icon={Plus}>
-                  Start a return
+              <>
+                <Button
+                  variant="secondary"
+                  icon={Download}
+                  isLoading={exportCsv.isPending}
+                  onClick={exportCsv.run}
+                >
+                  Export
                 </Button>
-              ) : undefined
+                {userIsOperator && (
+                  <Button onClick={openStart} icon={Plus}>
+                    Start a return
+                  </Button>
+                )}
+              </>
             }
           />
           <Tabs

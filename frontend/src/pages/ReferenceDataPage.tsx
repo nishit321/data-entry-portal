@@ -9,6 +9,7 @@ import {
   Alert,
   Badge,
   Button,
+  BulkBar,
   ConfirmDialog,
   FormField,
   IconButton,
@@ -177,6 +178,44 @@ export function ReferenceDataPage() {
 
   const rows = listQuery.data?.data ?? [];
 
+  /*
+   * Retiring several lookup values at once.
+   *
+   * These lists are what the questionnaire's dropdowns read, and they are edited in batches rather
+   * than singly: a spectrum refarming retires three bands, a technology goes end-of-life across
+   * every list that mentions it. Deactivating is the operation that matters here, and it is the
+   * gentle one. An inactive value stops being offered on new returns and stays readable on every
+   * return that already used it, which is exactly what deleting would not do.
+   */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pendingBulk, setPendingBulk] = useState<'activate' | 'deactivate' | null>(null);
+  const selectedItems = rows.filter((i) => selected.has(i.id));
+
+  const bulkMutation = useMutation({
+    mutationFn: async (action: 'activate' | 'deactivate') => {
+      const isActive = action === 'activate';
+      const changing = selectedItems.filter((i) => i.isActive !== isActive);
+      await Promise.all(changing.map((i) => referenceApi.update(i.id, { isActive })));
+      return changing.length;
+    },
+    onSuccess: (count, action) => {
+      void qc.invalidateQueries({ queryKey: referenceKeys.all });
+      setSelected(new Set());
+      setPendingBulk(null);
+      toast.success(
+        count === 0
+          ? 'Nothing to change: every value selected was already in that state.'
+          : `${count} ${count === 1 ? 'value' : 'values'} ${
+              action === 'activate' ? 'activated' : 'deactivated'
+            }.`,
+      );
+    },
+    onError: (err) => {
+      setPendingBulk(null);
+      toast.error(getErrorMessage(err, "We couldn't update every value"));
+    },
+  });
+
   const columns: Column<ReferenceItem>[] = [
     {
       header: 'Code',
@@ -270,6 +309,18 @@ export function ReferenceDataPage() {
       onPageSizeChange={list.setPageSize}
       refreshing={listQuery.isFetching && !listQuery.isLoading}
       onDensityChange={setDensity}
+      selectionBar={
+        selected.size > 0 ? (
+          <BulkBar count={selected.size} noun="value" onClear={() => setSelected(new Set())}>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('activate')}>
+              Activate
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setPendingBulk('deactivate')}>
+              Deactivate
+            </Button>
+          </BulkBar>
+        ) : undefined
+      }
       footnote={
         <p className="flex items-center gap-1.5 text-xs text-gray-500">
           <ListChecks size={13} aria-hidden /> Recurring {'"Other"'} answers from returns can be
@@ -289,6 +340,9 @@ export function ReferenceDataPage() {
         order={list.order}
         onSortChange={list.setSort}
         density={density}
+        selectable
+        selectedKeys={selected}
+        onSelectionChange={setSelected}
         emptyMessage={
           list.hasActiveFilters ? 'No values match your filters.' : 'No values in this list yet.'
         }
@@ -387,6 +441,23 @@ export function ReferenceDataPage() {
         isLoading={deleteMutation.isPending}
         onConfirm={() => confirming && deleteMutation.mutate(confirming.id)}
         onClose={() => setConfirming(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingBulk !== null}
+        title={pendingBulk === 'activate' ? 'Activate these values?' : 'Deactivate these values?'}
+        message={
+          pendingBulk === 'activate'
+            ? `${selected.size} selected. They start being offered on new returns again.`
+            : `${selected.size} selected. They stop being offered on new returns, and stay readable on every return that already used them.`
+        }
+        confirmLabel={pendingBulk === 'activate' ? 'Activate' : 'Deactivate'}
+        tone={pendingBulk === 'deactivate' ? 'danger' : 'primary'}
+        isLoading={bulkMutation.isPending}
+        onConfirm={() => {
+          if (pendingBulk) bulkMutation.mutate(pendingBulk);
+        }}
+        onClose={() => setPendingBulk(null)}
       />
     </ListShell>
   );

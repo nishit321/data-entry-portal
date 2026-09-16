@@ -2,6 +2,9 @@ import {
   EntityStatus,
   EntityType,
   FieldType,
+  EnforcementOrderStatus,
+  EnforcementOrderType,
+  EnforcementReason,
   FlowOrStock,
   NetworkSiteKind,
   NetworkSiteStatus,
@@ -58,6 +61,17 @@ async function seedReviewers() {
     { email: 'checker@nca.gov.ss', firstName: 'Checker', role: Role.CHECKER },
     { email: 'verifier@nca.gov.ss', firstName: 'Verifier', role: Role.VERIFIER },
     { email: 'approver@nca.gov.ss', firstName: 'Approver', role: Role.APPROVER },
+    /*
+     * A supervisor, and an analyst.
+     *
+     * Added because without them two things in the product cannot be shown at all. Sign-off on an
+     * enforcement order escalates to a second person, and with one administrator in the whole
+     * demonstration there is no second person to escalate to. The analyst is who drafts one: they
+     * read the case book but cannot approve their own proposal, which is the separation the rule
+     * exists for.
+     */
+    { email: 'supervisor@nca.gov.ss', firstName: 'Supervisor', role: Role.SUPERVISOR },
+    { email: 'analyst@nca.gov.ss', firstName: 'Analyst', role: Role.ANALYST },
   ];
   for (const r of reviewers) {
     if (await prisma.user.findUnique({ where: { email: r.email } })) {
@@ -181,8 +195,8 @@ async function seedReferenceData() {
     FIXED_ACCESS_TYPE: [
       { code: 'DSL', label: 'DSL' },
       { code: 'FIBER', label: 'Fibre' },
-      { code: 'SATELLITE_LEO', label: 'Satellite — LEO' },
-      { code: 'SATELLITE_GEO', label: 'Satellite — Geostationary' },
+      { code: 'SATELLITE_LEO', label: 'Satellite (LEO)' },
+      { code: 'SATELLITE_GEO', label: 'Satellite (geostationary)' },
       { code: 'WIRELESS_BROADBAND', label: 'Wireless Broadband' },
     ],
     TRANSACTION_TYPE: [
@@ -436,7 +450,7 @@ async function seedSamplePeriod() {
     select: { id: true },
   });
   if (!template) {
-    console.log('Sample template not published yet — skipping sample period.');
+    console.log('Sample template not published yet, so the sample period was skipped.');
     return;
   }
   const label = '2026 Q1';
@@ -792,6 +806,262 @@ async function seedNetwork() {
   console.log(`Seeded ${nodes.length} network sites and ${routes.length} fibre routes.`);
 }
 
+/**
+ * A penalty schedule line, and two compliance cases that show what it produces.
+ *
+ * Two cases rather than one, and they are deliberately in different states, because the thing this
+ * screen has to get across is a distinction rather than a number:
+ *
+ *  - One still inside its thirty-day remedy notice. The figure is real and growing, and the
+ *    operator does not owe it yet. The screen says so and gives the date it becomes payable.
+ *  - One whose notice has lapsed unremedied. The same kind of figure, now payable.
+ *
+ * A demonstration with only the second would show an amount and a date and teach nobody the
+ * difference, which is exactly how the screen read before 16 September 2026.
+ */
+async function seedEnforcement() {
+  const entity = await prisma.entity.findUnique({
+    where: { licenceNumber: 'NCA/MNO/2026/001' },
+    select: { id: true },
+  });
+  if (!entity) {
+    console.log('Demo operator not seeded yet, skipping the compliance cases.');
+    return;
+  }
+
+  const periods = await prisma.reportingPeriod.findMany({
+    where: { deletedAt: null, status: PeriodStatus.CLOSED },
+    orderBy: { periodEnd: 'desc' },
+    take: 2,
+    select: { id: true, label: true, dueDate: true },
+  });
+  if (periods.length < 2) {
+    console.log('Fewer than two closed periods, skipping the compliance cases.');
+    return;
+  }
+
+  /*
+   * Tier 1 of NCA's schedule: a fixed charge plus a daily one, capped.
+   *
+   * Seeded so the demo prices its cases at all. Without a line in force every case reads "Not
+   * priced", which is correct and shows nothing.
+   */
+  const existingRule = await prisma.penaltyRule.findFirst({
+    where: { label: 'Tier 1: late return', deletedAt: null },
+    select: { id: true },
+  });
+  const rule =
+    existingRule ??
+    (await prisma.penaltyRule.create({
+      data: {
+        reason: EnforcementReason.MISSED_DEADLINE,
+        entityType: null,
+        fixedAmount: new Prisma.Decimal(500000),
+        dailyAmount: new Prisma.Decimal(50000),
+        maxAmount: new Prisma.Decimal(10000000),
+        label: 'Tier 1: late return',
+        effectiveFrom: new Date('2025-01-01'),
+      },
+      select: { id: true },
+    }));
+
+  const day = 86_400_000;
+  const now = Date.now();
+
+  const cases = [
+    {
+      // Still inside its notice: opened a fortnight ago, sixteen days left to run.
+      period: periods[0],
+      daysLate: 22,
+      remedyNoticeAt: new Date(now - 14 * day),
+      remedyDueAt: new Date(now + 16 * day),
+      penaltyAssessedAt: null,
+    },
+    {
+      // Notice lapsed unremedied, so the same kind of figure is now payable.
+      period: periods[1],
+      daysLate: 68,
+      remedyNoticeAt: new Date(now - 58 * day),
+      remedyDueAt: new Date(now - 28 * day),
+      penaltyAssessedAt: new Date(now - 28 * day),
+    },
+  ];
+
+  for (const c of cases) {
+    const amount = 500000 + 50000 * c.daysLate;
+    await prisma.enforcementCase.upsert({
+      where: {
+        entityId_periodId_reason: {
+          entityId: entity.id,
+          periodId: c.period.id,
+          reason: EnforcementReason.MISSED_DEADLINE,
+        },
+      },
+      update: {},
+      create: {
+        entityId: entity.id,
+        periodId: c.period.id,
+        reason: EnforcementReason.MISSED_DEADLINE,
+        note: `The return for ${c.period.label} was not filed by the deadline.`,
+        penaltyRuleId: rule.id,
+        penaltyAmount: new Prisma.Decimal(Math.min(amount, 10000000)),
+        penaltyDays: c.daysLate,
+        penaltyAssessedAt: c.penaltyAssessedAt,
+        defaultStartedAt: new Date(now - c.daysLate * day),
+        remedyNoticeAt: c.remedyNoticeAt,
+        remedyDueAt: c.remedyDueAt,
+      },
+    });
+  }
+  console.log(`Seeded a penalty schedule line and ${cases.length} compliance cases.`);
+  await seedEnforcementOrders();
+}
+
+/**
+ * One drafted order and one in force, so the screen shows the difference.
+ *
+ * That difference is the whole point of the screen and the easiest thing to miss. A draft carries
+ * no legal effect at all; an approved order stops an operator trading. They sit in the same list,
+ * and a demonstration with only one of them would teach nobody which is which.
+ *
+ * Drafted by one officer and approved by another, because that is the rule the service enforces:
+ * sign-off escalates to a second person, and an order approved by the person who wrote it would be
+ * a demonstration of something the portal refuses to do.
+ */
+async function seedEnforcementOrders() {
+  const [officer, director] = await Promise.all([
+    prisma.user.findFirst({ where: { role: Role.ANALYST }, select: { id: true } }),
+    prisma.user.findFirst({ where: { role: Role.SUPERVISOR }, select: { id: true } }),
+  ]);
+  const drafter =
+    officer ?? (await prisma.user.findFirst({ where: { role: Role.ADMIN }, select: { id: true } }));
+  if (!drafter || !director) {
+    console.log('No officer and supervisor pair, so the enforcement orders were skipped.');
+    return;
+  }
+
+  const cases = await prisma.enforcementCase.findMany({
+    where: { status: 'OPEN', entity: { licenceNumber: 'NCA/MNO/2026/001' } },
+    orderBy: { openedAt: 'asc' },
+    take: 2,
+    select: { id: true, period: { select: { label: true } } },
+  });
+  if (cases.length < 2) {
+    console.log('Fewer than two open cases for the demo operator, so the orders were skipped.');
+    return;
+  }
+
+  const day = 86_400_000;
+  const orders = [
+    {
+      caseId: cases[0].id,
+      type: EnforcementOrderType.SUSPENSION_PARTIAL,
+      status: EnforcementOrderStatus.APPROVED,
+      reason:
+        `The return for ${cases[0].period.label} remains unfiled after the remedy period. ` +
+        'New subscriber activations are suspended until it is filed and approved.',
+      legalBasis: 'Section 42(3) of the Communications Act',
+      effectiveFrom: new Date(Date.now() - 6 * day),
+      durationDays: 90,
+      approvedById: director.id,
+      approvedAt: new Date(Date.now() - 6 * day),
+    },
+    {
+      caseId: cases[1].id,
+      type: EnforcementOrderType.SUSPENSION_FULL,
+      status: EnforcementOrderStatus.DRAFT,
+      reason:
+        'Proposed escalation: a second consecutive unfiled return following a partial suspension ' +
+        'that produced no response.',
+      legalBasis: 'Section 42(4) of the Communications Act',
+      effectiveFrom: new Date(Date.now() + 14 * day),
+      durationDays: 30,
+      approvedById: null,
+      approvedAt: null,
+    },
+  ];
+
+  let made = 0;
+  for (const order of orders) {
+    const already = await prisma.enforcementOrder.findFirst({
+      where: { caseId: order.caseId },
+      select: { id: true },
+    });
+    if (already) continue;
+    await prisma.enforcementOrder.create({
+      data: { ...order, draftedById: drafter.id },
+    });
+    made += 1;
+  }
+  if (made > 0) console.log(`Seeded ${made} enforcement orders, one in force and one drafted.`);
+}
+
+/**
+ * An agent register at something like real size.
+ *
+ * A mobile money operator has hundreds of cash-in and cash-out agents, and the demo had one. That
+ * is not only a thin demonstration: the agent register is the screen the portal's longest list
+ * lives on, and a one-row table answers no question about whether the list holds up. With a real
+ * number in it, a page of 100 can be measured rather than guessed at.
+ *
+ * Spread across South Sudan's states with coordinates, because the map reads this table too, and a
+ * register where every agent sits on the same point demonstrates nothing about either screen.
+ */
+async function seedAgentRegister() {
+  // The demo operator, which offers mobile money as well as voice and data. There is no
+  // standalone MMO in the demonstration, and an agent register belongs to whoever runs the float.
+  const entity = await prisma.entity.findUnique({
+    where: { licenceNumber: 'NCA/MNO/2026/001' },
+    select: { id: true },
+  });
+  if (!entity) {
+    console.log('Demo operator not seeded yet, skipping the agent register.');
+    return;
+  }
+
+  const existing = await prisma.agent.count({ where: { entityId: entity.id, deletedAt: null } });
+  if (existing >= 200) {
+    console.log(`Agent register already seeded (${existing} agents).`);
+    return;
+  }
+
+  /** Towns with real coordinates, so the map shows a network rather than a pile. */
+  const towns = [
+    { name: 'Juba', lat: 4.8594, lng: 31.5713 },
+    { name: 'Wau', lat: 7.7, lng: 27.9898 },
+    { name: 'Malakal', lat: 9.5334, lng: 31.6605 },
+    { name: 'Yei', lat: 4.0949, lng: 30.6774 },
+    { name: 'Bor', lat: 6.2088, lng: 31.5591 },
+    { name: 'Aweil', lat: 8.7667, lng: 27.4 },
+    { name: 'Torit', lat: 4.4133, lng: 32.5703 },
+    { name: 'Rumbek', lat: 6.8, lng: 29.6772 },
+    { name: 'Yambio', lat: 4.5721, lng: 28.3955 },
+    { name: 'Bentiu', lat: 9.2333, lng: 29.8 },
+  ];
+  const kinds = ['Kiosk', 'Store', 'Pharmacy', 'Market stall', 'Filling station', 'Supermarket'];
+
+  const AGENTS = 250;
+  const rows = Array.from({ length: AGENTS }, (_, i) => {
+    const town = towns[i % towns.length];
+    // A deterministic scatter of a few kilometres, so a re-seed produces the same register.
+    const jitter = (n: number) => ((((i * 37 + n * 17) % 100) - 50) / 1000) * 3;
+    return {
+      entityId: entity.id,
+      agentReference: `AG-${String(i + 1).padStart(4, '0')}`,
+      name: `${town.name} ${kinds[i % kinds.length]} ${Math.floor(i / kinds.length) + 1}`,
+      location: town.name,
+      latitude: new Prisma.Decimal((town.lat + jitter(1)).toFixed(6)),
+      longitude: new Prisma.Decimal((town.lng + jitter(2)).toFixed(6)),
+      // Roughly one in nine closed, because a register of only active agents hides the state the
+      // list filters on.
+      isActive: i % 9 !== 0,
+    };
+  });
+
+  await prisma.agent.createMany({ data: rows, skipDuplicates: true });
+  console.log(`Seeded ${AGENTS} agents across ${towns.length} towns.`);
+}
+
 async function main() {
   await seedAdmin();
   await seedReviewers();
@@ -801,6 +1071,8 @@ async function main() {
   await seedSamplePeriod();
   await seedPublicPortal();
   await seedNetwork();
+  await seedEnforcement();
+  await seedAgentRegister();
 }
 
 main()
