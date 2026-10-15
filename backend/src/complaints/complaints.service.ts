@@ -8,6 +8,7 @@ import { AuthUser } from '../common/decorators/current-user.decorator';
 import { RequestContext } from '../common/utils/request-context.util';
 import { paginate, toSkipTake } from '../common/utils/pagination.util';
 import { formatReferenceNumber } from '../common/utils/reference-number.util';
+import { byOperator, monthsEnding } from './by-operator';
 import { generateRawToken, hashToken } from '../common/utils/token.util';
 import { StorageConfig } from '../config/configuration';
 import { StorageService, UploadedFile } from '../files/storage.service';
@@ -99,6 +100,36 @@ const complaintAttachmentSelect = {
 @Injectable()
 export class ComplaintsService {
   private readonly maxAttachmentBytes: number;
+
+  /**
+   * Complaints grouped by the operator they are about, over the last `months` months.
+   *
+   * The Authority's own view, so every operator is named and every figure shown, however small.
+   * The public version of this is a separate method with a threshold, in the public portal.
+   */
+  async byOperator(months: number) {
+    const window = monthsEnding(new Date(), months);
+    const since = new Date(`${window[0]}-01T00:00:00.000Z`);
+    const facts = await this.prisma.complaint.findMany({
+      where: { createdAt: { gte: since } },
+      select: {
+        aboutEntityId: true,
+        category: true,
+        status: true,
+        createdAt: true,
+        resolvedAt: true,
+      },
+    });
+    const ids = [...new Set(facts.map((f) => f.aboutEntityId).filter((id): id is string => !!id))];
+    const entities = await this.prisma.entity.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, name: true, type: true },
+    });
+    return {
+      months: window,
+      ...byOperator(facts, new Map(entities.map((e) => [e.id, e])), window),
+    };
+  }
 
   constructor(
     private readonly prisma: PrismaService,

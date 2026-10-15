@@ -8,6 +8,9 @@ import {
   SubmissionStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { median } from '../common/utils/median.util';
+import { SettingsService } from '../settings/settings.service';
+import { byOperator, MIN_COMPLAINTS_TO_PUBLISH, monthsEnding } from '../complaints/by-operator';
 import { MIN_PEERS_FOR_DISCLOSURE } from '../benchmarking/peer-statistics';
 import { PublicIndicatorQueryDto } from './dto/public-query.dto';
 
@@ -94,7 +97,71 @@ export interface PublicIndicatorReport {
  */
 @Injectable()
 export class PublicPortalService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
+
+  /**
+   * Complaint figures for each named operator, if the Authority has chosen to publish them.
+   *
+   * Off unless an administrator turns it on, because the public pages have been sector totals only
+   * on the Authority's own instruction, and a name printed beside a complaint count cannot be
+   * unprinted. When it is off this says so and nothing else.
+   *
+   * When it is on, an operator is named only with at least MIN_COMPLAINTS_TO_PUBLISH complaints
+   * in the window; the rest are counted together. Per operator it gives what a reader can fairly
+   * compare: how many, what share reached an end, and how quickly. Not the categories, and not the
+   * months, which on a small operator would start to describe individual people's complaints.
+   */
+  async complaintsByOperator() {
+    if (!(await this.settings.getBoolean('public.complaintsByOperator'))) {
+      return { published: false as const };
+    }
+    const WINDOW_MONTHS = 12;
+    const window = monthsEnding(new Date(), WINDOW_MONTHS);
+    const facts = await this.prisma.complaint.findMany({
+      where: { createdAt: { gte: new Date(`${window[0]}-01T00:00:00.000Z`) } },
+      select: {
+        aboutEntityId: true,
+        category: true,
+        status: true,
+        createdAt: true,
+        resolvedAt: true,
+      },
+    });
+    const ids = [...new Set(facts.map((f) => f.aboutEntityId).filter((id): id is string => !!id))];
+    const entities = await this.prisma.entity.findMany({
+      where: { id: { in: ids }, deletedAt: null, status: EntityStatus.ACTIVE },
+      select: { id: true, name: true, type: true },
+    });
+    const { operators, unattributed } = byOperator(
+      facts,
+      new Map(entities.map((e) => [e.id, e])),
+      window,
+    );
+
+    const named = operators.filter((o) => o.received >= MIN_COMPLAINTS_TO_PUBLISH);
+    const few = operators.filter((o) => o.received < MIN_COMPLAINTS_TO_PUBLISH);
+    return {
+      published: true as const,
+      windowMonths: WINDOW_MONTHS,
+      threshold: MIN_COMPLAINTS_TO_PUBLISH,
+      operators: named.map((o) => ({
+        // Name and type only. No id: nothing here should be joinable to anything else.
+        name: o.entity!.name,
+        type: o.entity!.type,
+        received: o.received,
+        resolutionRate: o.resolutionRate,
+        medianDaysToResolve: o.medianDaysToResolve,
+      })),
+      belowThreshold: {
+        operators: few.length,
+        complaints: few.reduce((sum, o) => sum + o.received, 0),
+      },
+      unattributed: unattributed.received,
+    };
+  }
 
   /**
    * The published sector indicators, each with a short series over recent closed periods.
@@ -281,7 +348,7 @@ export class PublicPortalService {
       resolution: {
         resolved: days.length,
         // Median, not mean: one case that sat for a year should not be allowed to describe the rest.
-        medianDays: days.length > 0 ? Math.round(this.median(days) * 10) / 10 : null,
+        medianDays: days.length > 0 ? Math.round(median(days) * 10) / 10 : null,
       },
     };
   }
@@ -361,11 +428,5 @@ export class PublicPortalService {
       default:
         return Math.round(figures.reduce((a, b) => a + b, 0) * 100) / 100;
     }
-  }
-
-  private median(values: number[]): number {
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
   }
 }

@@ -28,7 +28,11 @@ import {
 import { PublicIndicatorChart } from '../components/PublicIndicatorChart';
 import { BrandMark } from '../components/BrandMark';
 import { describePublishedChange, latestPublishedChange } from '../lib/published-change';
-import { publicPortalApi, publicPortalKeys } from '../lib/public-portal.api';
+import {
+  publicPortalApi,
+  publicPortalKeys,
+  type PublicComplaintsByOperator,
+} from '../lib/public-portal.api';
 import { getErrorMessage } from '../lib/api';
 import {
   COMPLAINT_CATEGORY_LABELS,
@@ -97,6 +101,10 @@ export function OpenDataPage() {
   const complaintsQuery = useQuery({
     queryKey: publicPortalKeys.complaints,
     queryFn: () => publicPortalApi.complaintsSummary(),
+  });
+  const byOperatorQuery = useQuery({
+    queryKey: publicPortalKeys.complaintsByOperator,
+    queryFn: () => publicPortalApi.complaintsByOperator(),
   });
 
   const overview = overviewQuery.data;
@@ -356,6 +364,10 @@ export function OpenDataPage() {
                 </div>
               )}
 
+              {byOperatorQuery.data?.published && (
+                <ComplaintsByOperator report={byOperatorQuery.data} />
+              )}
+
               <p className="mt-4 text-sm text-gray-500">
                 Have something to report?{' '}
                 <Link to="/complaints/file" className="text-brand-700 underline">
@@ -395,5 +407,78 @@ function IndicatorChange({ points }: { points: PublicPoint[] }) {
       {Math.round(moved.change * 100) !== 0 && <Icon size={15} aria-hidden />}
       {describePublishedChange(moved)}
     </p>
+  );
+}
+
+/**
+ * Complaint figures per named operator, shown only once the Authority has published them.
+ *
+ * What is shown is what can be fairly compared: how many, what share reached an end, and how
+ * quickly. Operators with too few complaints for a rate to mean anything are counted together, not
+ * named, and the page says so rather than leaving them out without a word.
+ */
+function ComplaintsByOperator({
+  report,
+}: {
+  report: Extract<PublicComplaintsByOperator, { published: true }>;
+}) {
+  const percent = (rate: number | null) => (rate === null ? '—' : `${Math.round(rate * 100)}%`);
+  return (
+    <div className="mt-6 border-t border-gray-100 pt-4">
+      <h3 className="text-base font-semibold text-gray-900">By operator</h3>
+      <p className="mt-1 text-sm text-gray-600">
+        The last {report.windowMonths} months. A larger operator serves more people and receives
+        more complaints, so compare how many reach an end and how quickly, not the totals.
+      </p>
+      {report.operators.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-600">
+          No operator has received {report.threshold} or more complaints in this period.
+        </p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-start text-xs uppercase tracking-wide text-gray-500">
+                <th scope="col" className="py-2 pe-4 text-start font-medium">
+                  {strings.field.operator}
+                </th>
+                <th scope="col" className="py-2 pe-4 text-end font-medium">
+                  Received
+                </th>
+                <th scope="col" className="py-2 pe-4 text-end font-medium">
+                  Reached an end
+                </th>
+                <th scope="col" className="py-2 text-end font-medium">
+                  Typical days
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {report.operators.map((o) => (
+                <tr key={o.name}>
+                  <td className="py-2 pe-4 font-medium text-gray-900">{o.name}</td>
+                  <td className="py-2 pe-4 text-end">{o.received}</td>
+                  <td className="py-2 pe-4 text-end">{percent(o.resolutionRate)}</td>
+                  <td className="py-2 text-end">{o.medianDaysToResolve ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {report.belowThreshold.operators > 0 && (
+        <p className="mt-3 text-xs text-gray-500">
+          {report.belowThreshold.complaints} more complaints were about{' '}
+          {report.belowThreshold.operators} operator
+          {report.belowThreshold.operators === 1 ? '' : 's'} with fewer than {report.threshold}{' '}
+          each. Too few to compare fairly, so they are not named.
+        </p>
+      )}
+      {report.unattributed > 0 && (
+        <p className="mt-1 text-xs text-gray-500">
+          {report.unattributed} did not name an operator.
+        </p>
+      )}
+    </div>
   );
 }

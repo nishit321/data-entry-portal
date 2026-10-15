@@ -58,6 +58,16 @@ export class PublicPortalController {
   }
 
   /** The closed periods a reader may filter between. Labels and dates, nothing more. */
+  /*
+   * Public, because the page that reads it is. It answers `{ published: false }` and nothing more
+   * until the Authority has switched publication on; see PublicPortalService.complaintsByOperator.
+   */
+  @Public()
+  @Get('complaints-by-operator')
+  complaintsByOperator() {
+    return this.portal.complaintsByOperator();
+  }
+
   @Public()
   @Get('periods')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })

@@ -43,6 +43,11 @@ const PUBLIC: Record<string, string> = {
     'the citizen-facing portal (Q4). Aggregated and disclosure-controlled.',
   'GET /api/v1/public/indicators': 'the same: published sector figures, never operator-level.',
   'GET /api/v1/public/complaints-summary': 'the same: counts, not complainants.',
+  'GET /api/v1/public/complaints-by-operator':
+    'complaint figures per named operator, which the public page shows only once an administrator ' +
+    'has switched publication on. Until then it answers { published: false } and nothing else; ' +
+    'after, it names only operators with enough complaints for a rate to mean anything, and ' +
+    'carries no ids.',
   'GET /api/v1/public/operators':
     'who holds a licence, so the complaint form can ask which operator a complaint is about. The ' +
     'one place the public side names an operator, and deliberately: the rule protects commercial ' +

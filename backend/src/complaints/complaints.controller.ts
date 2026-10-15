@@ -26,6 +26,7 @@ import {
   TrackComplaintDto,
   UpdateComplaintStatusDto,
 } from './dto/complaint.dto';
+import { ComplaintsByOperatorQueryDto } from './dto/complaints-by-operator.dto';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -92,6 +93,16 @@ export class ComplaintsController {
   @Roles(...READERS)
   list(@Query() query: ComplaintQueryDto) {
     return this.complaints.findAll(query);
+  }
+
+  /*
+   * Declared before `:id` on purpose: after it, "by-operator" would be taken for an id and refused
+   * by the UUID check before this route was ever considered.
+   */
+  @Get('by-operator')
+  @Roles(...READERS)
+  byOperator(@Query() query: ComplaintsByOperatorQueryDto) {
+    return this.complaints.byOperator(query.months);
   }
 
   @Get(':id')

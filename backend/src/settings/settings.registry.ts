@@ -46,6 +46,20 @@ export const SETTINGS = {
       'refuses any attempt to. Accounts are then made by an administrator on the Users screen.',
     isPublic: true,
   },
+  'public.complaintsByOperator': {
+    type: 'boolean',
+    // Off. The public pages have been sector totals only, on the Authority's own instruction, and
+    // naming operators beside their complaint figures cannot be taken back once it is public.
+    // That makes it the Authority's decision to take deliberately, and an audited one.
+    default: false,
+    label: 'Publish complaint figures for each operator',
+    description:
+      'When this is on, the public open-data page shows, for each operator with at least ten ' +
+      'complaints in the last twelve months, how many it received, how many reached an end and how ' +
+      'quickly. Operators with fewer are counted together and not named. When it is off, the ' +
+      'public page shows sector totals only, as it always has.',
+    isPublic: false,
+  },
   'session.idleMinutes': {
     type: 'number',
     default: 20,

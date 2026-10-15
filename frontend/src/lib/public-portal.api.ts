@@ -36,6 +36,29 @@ export interface PublishableField {
 }
 
 /** The open-data endpoints. No token is sent; these are readable by anyone. */
+/**
+ * Complaint figures per named operator on the public page.
+ *
+ * Unpublished until an administrator turns it on. When published, an operator is named only with
+ * at least `threshold` complaints in the window; the rest are counted together.
+ */
+export type PublicComplaintsByOperator =
+  | { published: false }
+  | {
+      published: true;
+      windowMonths: number;
+      threshold: number;
+      operators: {
+        name: string;
+        type: string;
+        received: number;
+        resolutionRate: number | null;
+        medianDaysToResolve: number | null;
+      }[];
+      belowThreshold: { operators: number; complaints: number };
+      unattributed: number;
+    };
+
 export const publicPortalApi = {
   overview: () => api.get<PublicOverview>('/public/overview').then((r) => r.data),
 
@@ -59,6 +82,10 @@ export const publicPortalApi = {
 
   complaintsSummary: () =>
     api.get<PublicComplaintsSummary>('/public/complaints-summary').then((r) => r.data),
+
+  /** Per-operator figures, or `{ published: false }` until the Authority chooses to publish. */
+  complaintsByOperator: () =>
+    api.get<PublicComplaintsByOperator>('/public/complaints-by-operator').then((r) => r.data),
 
   /**
    * Download what the page is showing.
@@ -105,6 +132,7 @@ export const publicPortalKeys = {
     ['public-portal', 'indicators', periods, filters] as const,
   periods: ['public-portal', 'periods'] as const,
   complaints: ['public-portal', 'complaints'] as const,
+  complaintsByOperator: ['public-portal', 'complaints-by-operator'] as const,
   operators: ['public-portal', 'operators'] as const,
   admin: ['public-indicators'] as const,
   available: ['public-indicators', 'available'] as const,

@@ -32,6 +32,8 @@ import {
   Prisma,
   PublicAggregation,
   ReferenceCategory,
+  ComplaintCategory,
+  ComplaintStatus,
   ReportingFrequency,
   Role,
   RuleSeverity,
@@ -40,6 +42,8 @@ import {
   TemplateStatus,
 } from '@prisma/client';
 import { hashPassword } from '../src/common/utils/password.util';
+import { generateRawToken, hashToken } from '../src/common/utils/token.util';
+import { formatReferenceNumber } from '../src/common/utils/reference-number.util';
 import { prisma, seedAdmin, seedReferenceData } from './seed-core';
 
 /**
@@ -999,6 +1003,97 @@ async function main() {
   await seedEnforcement();
   await seedAgentRegister();
   await seedPayments();
+  await seedComplaints();
+}
+
+/**
+ * Complaints from the public, so the case book, the figures by operator and the public summary
+ * all have something on them.
+ *
+ * Written to read like the real thing in South Sudan: a mobile money transfer that never arrived,
+ * a bundle charged twice, a town that lost signal. Spread over the last six months and across
+ * statuses, so the trend has a shape and some cases are still open. The demo operator has twelve,
+ * enough to clear the publication threshold of ten if the Authority turns publication on; the
+ * others have a handful each, and three name nobody, as real ones often do.
+ *
+ * Skipped on a database that already has complaints: those are somebody's real cases, or an
+ * earlier run's demo ones, and neither should be added to.
+ */
+async function seedComplaints() {
+  if ((await prisma.complaint.count()) > 0) {
+    console.log('Complaints already exist, leaving them as they are.');
+    return;
+  }
+  const byLicence = async (licence: string) =>
+    (
+      await prisma.entity.findFirst({
+        where: { licenceNumber: licence, deletedAt: null },
+        select: { id: true },
+      })
+    )?.id ?? null;
+  const demo = await byLicence('NCA/MNO/2026/001');
+  const equatoria = await byLicence('NCA/MNO/2026/003');
+  const nile = await byLicence('NCA/ISP/2026/002');
+  if (!demo) {
+    console.log('Demo operator not seeded yet, skipping complaints.');
+    return;
+  }
+
+  const C = ComplaintCategory;
+  const S = ComplaintStatus;
+  // [about, category, status, days ago filed, days to an end (if it ended), subject]
+  const cases: [
+    string | null,
+    ComplaintCategory,
+    ComplaintStatus,
+    number,
+    number | null,
+    string,
+  ][] = [
+    [demo, C.BILLING, S.RESOLVED, 170, 6, 'Charged twice for the same data bundle'],
+    [demo, C.SERVICE_QUALITY, S.RESOLVED, 150, 3, 'Calls drop every few minutes in Juba town'],
+    [demo, C.AGENT_CONDUCT, S.CLOSED, 140, 9, 'Agent asked for an extra fee to withdraw cash'],
+    [demo, C.BILLING, S.RESOLVED, 120, 4, 'Airtime deducted with no call made'],
+    [demo, C.COVERAGE, S.RESOLVED, 100, 12, 'No signal in Kapoeta since the tower went down'],
+    [demo, C.SERVICE_QUALITY, S.RESOLVED, 80, 2, 'Mobile money transfer not received'],
+    [demo, C.BILLING, S.IN_REVIEW, 60, null, 'Bundle expired a week early'],
+    [demo, C.DATA_PRIVACY, S.RESOLVED, 45, 5, 'Received messages meant for another customer'],
+    [demo, C.SERVICE_QUALITY, S.IN_REVIEW, 30, null, 'Internet very slow every evening'],
+    [demo, C.AGENT_CONDUCT, S.RECEIVED, 18, null, 'Agent refused to register my SIM card'],
+    [demo, C.BILLING, S.RECEIVED, 9, null, 'Charged for a service I never asked for'],
+    [demo, C.COVERAGE, S.RECEIVED, 3, null, 'Lost signal along the Juba to Nimule road'],
+    [equatoria, C.COVERAGE, S.RESOLVED, 110, 8, 'No coverage in Yei market'],
+    [equatoria, C.BILLING, S.RESOLVED, 70, 3, 'Tariff changed without notice'],
+    [equatoria, C.SERVICE_QUALITY, S.RECEIVED, 12, null, 'SMS not delivered for two days'],
+    [nile, C.SERVICE_QUALITY, S.CLOSED, 90, 15, 'Home internet down for a week'],
+    [nile, C.BILLING, S.IN_REVIEW, 25, null, 'Billed for a month after cancelling'],
+    [null, C.SERVICE_QUALITY, S.RESOLVED, 130, 7, 'Mobile money sent to the wrong number'],
+    [null, C.SUGGESTION, S.CLOSED, 55, 10, 'Please publish coverage maps for rural counties'],
+    [null, C.OTHER, S.RECEIVED, 6, null, 'Not sure which network is to blame for dropped calls'],
+  ];
+
+  const now = Date.now();
+  const year = new Date().getFullYear();
+  let seq = 0;
+  for (const [about, category, status, ago, toEnd, subject] of cases) {
+    seq += 1;
+    const createdAt = new Date(now - ago * 86_400_000);
+    await prisma.complaint.create({
+      data: {
+        referenceNumber: formatReferenceNumber('CMP', year, seq),
+        // A real code, hashed and thrown away: nobody can track a demo complaint, which is right.
+        trackingCodeHash: hashToken(generateRawToken()),
+        category,
+        status,
+        subject,
+        description: `${subject}. Filed through the public complaint form.`,
+        aboutEntityId: about,
+        createdAt,
+        resolvedAt: toEnd === null ? null : new Date(createdAt.getTime() + toEnd * 86_400_000),
+      },
+    });
+  }
+  console.log(`Seeded ${cases.length} demo complaints.`);
 }
 
 /**

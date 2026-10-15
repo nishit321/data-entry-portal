@@ -1,3 +1,4 @@
+import { median } from '../common/utils/median.util';
 /**
  * Spotting figures that moved implausibly (Phase 2).
  *
@@ -67,17 +68,10 @@ export const DEFAULT_DETECTION: DetectionOptions = {
 };
 
 /**
- * The median, not the mean.
- *
- * One freak quarter should not drag the baseline with it. A mean lets a single outlier hide the
- * next one; a median of the last few periods stays where the normal figures are.
+ * The median, not the mean: one freak quarter should not drag the baseline with it. Kept exported
+ * from here as well as from its new home, because this file's callers and tests import it by name.
  */
-export function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
+export { median } from '../common/utils/median.util';
 
 function pct(value: number, baseline: number): number {
   return (Math.abs(value - baseline) / Math.abs(baseline)) * 100;

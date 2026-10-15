@@ -109,6 +109,11 @@ const ApiCredentialsPage = lazy(() =>
 const ComplaintsPage = lazy(() =>
   import('./pages/ComplaintsPage').then((m) => ({ default: m.ComplaintsPage })),
 );
+const ComplaintsByOperatorPage = lazy(() =>
+  import('./pages/ComplaintsByOperatorPage').then((m) => ({
+    default: m.ComplaintsByOperatorPage,
+  })),
+);
 const SystemPage = lazy(() =>
   import('./pages/SystemPage').then((m) => ({ default: m.SystemPage })),
 );
@@ -239,7 +244,13 @@ const router = createBrowserRouter([
   ),
 
   // Citizen complaints — the Authority case book (the public files at /complaints/file)
-  gated(['ADMIN', 'SUPERVISOR', 'ANALYST'], [{ path: '/complaints', element: <ComplaintsPage /> }]),
+  gated(
+    ['ADMIN', 'SUPERVISOR', 'ANALYST'],
+    [
+      { path: '/complaints', element: <ComplaintsPage /> },
+      { path: '/complaints/by-operator', element: <ComplaintsByOperatorPage /> },
+    ],
+  ),
 
   // Operator self-service team management
   gated(['OPERATOR_ADMIN'], [{ path: '/my-team', element: <OperatorUsersPage /> }]),

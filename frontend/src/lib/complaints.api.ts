@@ -97,8 +97,37 @@ export const complaintsApi = {
       .then((r) => r.data),
 };
 
+/** One operator's complaints over the window, as the Authority sees them. */
+export interface OperatorComplaints {
+  /** Null for the line of complaints that named no operator. */
+  entity: { id: string; name: string; type: string } | null;
+  received: number;
+  open: number;
+  /** Reached an end: resolved or closed, as on the public page. */
+  resolved: number;
+  resolutionRate: number | null;
+  medianDaysToResolve: number | null;
+  byCategory: { category: ComplaintCategory; count: number }[];
+  /** Oldest month first, `YYYY-MM`, every month in the window present. */
+  byMonth: { month: string; count: number }[];
+}
+
+export interface ComplaintsByOperator {
+  months: string[];
+  operators: OperatorComplaints[];
+  unattributed: OperatorComplaints;
+}
+
+export const complaintsByOperatorApi = {
+  get: (months: number) =>
+    api
+      .get<ComplaintsByOperator>('/complaints/by-operator', { params: { months } })
+      .then((r) => r.data),
+};
+
 export const complaintKeys = {
   all: ['complaints'] as const,
+  byOperator: (months: number) => ['complaints', 'by-operator', months] as const,
   list: (params: ComplaintListParams) => ['complaints', 'list', params] as const,
   attachments: (id: string) => ['complaints', 'attachments', id] as const,
 };
