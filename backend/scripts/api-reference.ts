@@ -9,10 +9,13 @@
  * week and nobody can tell which line went stale. This reads the same census the security tests
  * read, so the document says exactly what the server enforces. `route-inventory.e2e-spec.ts` fails
  * when a route exists that this file does not mention, which is the reminder to run it again.
+ *
+ * It writes into docs/, which is kept outside this repository like the rest of the documentation,
+ * and makes the folder on a machine that does not have it yet.
  */
 import 'dotenv/config';
-import { writeFileSync } from 'fs';
-import { join } from 'path';
+import { mkdirSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
@@ -72,6 +75,7 @@ async function main() {
     lines.push('');
   }
 
+  mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, lines.join('\n'), 'utf8');
   console.log(`  Wrote ${routes.length} routes in ${groups.size} areas to docs/API_ROUTES.md`);
 }

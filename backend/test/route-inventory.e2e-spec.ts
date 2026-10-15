@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -153,21 +153,25 @@ describe('route inventory (e2e)', () => {
     }
   });
 
-  it('is listed in the published API reference', () => {
-    /*
-     * docs/API_ROUTES.md is generated from this same census, so it cannot be wrong about a route
-     * it mentions. What it can be is out of date: a route added since anybody last ran the
-     * generator is simply absent, and an integrator reading it would never know the route exists.
-     * This is the reminder.
-     */
-    const reference = readFileSync(join(__dirname, '..', '..', 'docs', 'API_ROUTES.md'), 'utf8');
+  /*
+   * docs/API_ROUTES.md is generated from this same census by `npm run docs:api`, so it cannot be
+   * wrong about a route it mentions. What it can be is out of date: a route added since anybody
+   * last ran the generator is simply absent, and an integrator reading it would never know.
+   *
+   * The documentation is kept outside this repository (see the README), so a fresh checkout, CI
+   * included, has no docs/ folder. There the check is reported as skipped rather than passed,
+   * because a check with nothing to read has not checked anything. On a machine that has the
+   * documentation, it runs.
+   */
+  const REFERENCE = join(__dirname, '..', '..', 'docs', 'API_ROUTES.md');
+  (existsSync(REFERENCE) ? it : it.skip)('is listed in the published API reference', () => {
+    const reference = readFileSync(REFERENCE, 'utf8');
     const missing = routes
       .filter((r) => !reference.includes(`| ${r.method} | \`${r.path}\` |`))
       .map((r) => r.signature);
     if (missing.length > 0) {
       throw new Error(
-        'These routes are not in docs/API_ROUTES.md. Run `npm run docs:api` in backend/ and ' +
-          'commit the result:\n  ' +
+        'These routes are not in docs/API_ROUTES.md. Run `npm run docs:api` in backend/:\n  ' +
           missing.join('\n  '),
       );
     }
