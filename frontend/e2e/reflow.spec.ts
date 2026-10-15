@@ -43,6 +43,7 @@ const OPERATOR_PAGES = [
   ['returns', '/submissions'],
   ['agents', '/agents'],
   ['revenue and levy', '/levy'],
+  ['payments', '/payments'],
 ] as const;
 
 test.use({ viewport: NARROW });

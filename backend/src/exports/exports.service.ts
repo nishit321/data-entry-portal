@@ -5,8 +5,8 @@ import { LevyService } from '../levy/levy.service';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
 import { LevyAssessmentQueryDto } from '../levy/dto/levy-query.dto';
-import { NUMBER_FORMAT, startSheet } from './export-format';
-import { addNote, addSummary, addTable, createDocument } from './pdf-document';
+import { moneyLabel, NUMBER_FORMAT, startSheet } from './export-format';
+import { addNote, addSummary, addTable, createDocument, toBuffer } from './pdf-document';
 
 /** How many recent periods the compliance workbook charts. */
 const TREND_PERIODS = 12;
@@ -18,12 +18,6 @@ async function toNodeBuffer(workbook: ExcelJS.Workbook): Promise<Buffer> {
 
 function percentLabel(value: number | null): string {
   return value === null ? 'Not applicable' : `${Math.round(value * 100)}%`;
-}
-
-function moneyLabel(value: number | null): string {
-  return value === null
-    ? 'Not calculated'
-    : `SSP ${value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /**
@@ -256,17 +250,6 @@ export class ExportsService {
         : 'No revenue field on this questionnaire is marked as the levy basis, so no revenue could be assessed. Mark the annual revenue field and generate this document again.',
     );
 
-    return this.finish(doc);
-  }
-
-  /** Collect a pdfkit stream into a buffer so the controller can send it in one piece. */
-  private finish(doc: PDFKit.PDFDocument): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', reject);
-      doc.end();
-    });
+    return toBuffer(doc);
   }
 }

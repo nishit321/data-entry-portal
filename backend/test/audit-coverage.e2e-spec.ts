@@ -113,7 +113,7 @@ const KML = Buffer.from(
  *    audit record, or one that deliberately does not, with the reason. Add a `POST` and this spec
  *    fails until somebody says which it is. That is the standing guard.
  * 2. **The probes** actually call a route and check the audit table grew. Every route in
- *    `MUST_AUDIT` is probed except two, and those two are named below with the reason.
+ *    `MUST_AUDIT` is probed here except four, and those four are named below with the reason.
  *
  *    `PROBED`, near the bottom of this file, is the authoritative list, and two tests hold the
  *    file to it: one fails if a declared route was not actually driven in the run, the other if a
@@ -127,6 +127,11 @@ const KML = Buffer.from(
  *    note against them: both write a record only when they *change* something, and two other
  *    suites run the same global call against the same database, so a probe there would pass most
  *    of the time and fail for a reason that has nothing to do with auditing.
+ *
+ *    The other two are `POST /payments` and `POST /payments/:id/reverse`. A payment can never be
+ *    deleted, in the application or in the database, and this suite rebuilds its fixtures by
+ *    deletion; so they are recorded and read back in payments.e2e-spec.ts, whose fixtures are made
+ *    unique to each run instead.
  *
  * **A probe never declares which action it expects.** It reads back what was written. Declaring a
  * hundred `AuditAction` names would put a hundred guesses in a file that reads like a
@@ -183,6 +188,10 @@ const MUST_AUDIT: Record<string, string> = {
   'POST /api/v1/templates': 'a questionnaire is created.',
   'PATCH /api/v1/templates/:id': 'and edited.',
   'POST /api/v1/templates/:id/publish': 'a questionnaire becomes the one operators must answer.',
+  // Money. Recorded and read back in payments.e2e-spec.ts rather than probed here: a payment can
+  // never be deleted, and this suite cleans up its fixtures by deletion on every run.
+  'POST /api/v1/payments': 'money received, against which charge, and who entered it.',
+  'POST /api/v1/payments/:id/reverse': 'and money taken back off the books, with the reason.',
   'POST /api/v1/templates/:id/archive':
     'a questionnaire taken out of use. It is how one leaves without being destroyed, so who did it ' +
     'has to be on record.',

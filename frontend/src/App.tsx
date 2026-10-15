@@ -74,6 +74,9 @@ const BenchmarkingPage = lazy(() =>
   import('./pages/BenchmarkingPage').then((m) => ({ default: m.BenchmarkingPage })),
 );
 const LevyPage = lazy(() => import('./pages/LevyPage').then((m) => ({ default: m.LevyPage })));
+const PaymentsPage = lazy(() =>
+  import('./pages/PaymentsPage').then((m) => ({ default: m.PaymentsPage })),
+);
 const DocumentsPage = lazy(() =>
   import('./pages/DocumentsPage').then((m) => ({ default: m.DocumentsPage })),
 );
@@ -187,6 +190,14 @@ const router = createBrowserRouter([
 
   // Revenue and levy — operators see their own assessment; Authority sees all and sets the rates
   gated([...OPERATORS, ...AUTHORITY_INTERNAL], [{ path: '/levy', element: <LevyPage /> }]),
+
+  // Payments — operators see their own balance and receipts; the Authority records and reverses.
+  // The review stages are left out, as on the server: checking a return's figures is not the same
+  // job as knowing what an operator has paid.
+  gated(
+    [...OPERATORS, 'ADMIN', 'SUPERVISOR', 'ANALYST'],
+    [{ path: '/payments', element: <PaymentsPage /> }],
+  ),
 
   // Licence repository — operators see their own documents; Authority sees every operator's
   gated(

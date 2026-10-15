@@ -107,3 +107,14 @@ export function addNote(doc: PDFKit.PDFDocument, text: string): void {
       width: doc.page.width - MARGIN * 2,
     });
 }
+
+/** Collect a pdfkit stream into a buffer, so a controller can send the document in one piece. */
+export function toBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.end();
+  });
+}

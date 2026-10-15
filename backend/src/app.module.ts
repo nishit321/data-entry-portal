@@ -14,6 +14,7 @@ import { EntitiesModule } from './entities/entities.module';
 import { AgentsModule } from './agents/agents.module';
 import { ReferenceDataModule } from './reference-data/reference-data.module';
 import { SettingsModule } from './settings/settings.module';
+import { PaymentsModule } from './payments/payments.module';
 import { TemplatesModule } from './templates/templates.module';
 import { ReportingPeriodsModule } from './reporting-periods/reporting-periods.module';
 import { SubmissionsModule } from './submissions/submissions.module';
@@ -71,6 +72,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     AgentsModule,
     ReferenceDataModule,
     SettingsModule,
+    PaymentsModule,
     TemplatesModule,
     ReportingPeriodsModule,
     SubmissionsModule,

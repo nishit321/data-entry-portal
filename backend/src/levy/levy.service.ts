@@ -131,7 +131,19 @@ export class LevyService {
 
     const periodId = query.periodId ?? (await this.latestAssessablePeriod(entityId));
     if (!periodId) return this.emptyResult();
+    return this.assessPeriod(periodId, entityId);
+  }
 
+  /**
+   * The levy for one period, for every operator or for one.
+   *
+   * Separate from `assessments` so that payments read exactly the figure this screen shows. A
+   * second calculation of "levy due" anywhere else would be a second answer to the same question,
+   * and the first time the two disagreed an operator would be told they owed money they had paid.
+   *
+   * No scoping here: callers decide whose figures they may ask for before they ask.
+   */
+  async assessPeriod(periodId: string, entityId?: string) {
     const period = await this.prisma.reportingPeriod.findFirst({
       where: { id: periodId, deletedAt: null },
       select: {

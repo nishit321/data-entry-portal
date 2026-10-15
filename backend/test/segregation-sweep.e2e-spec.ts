@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -102,6 +104,27 @@ const NOT_ENTITY_SCOPED: Record<string, string> = {
     "a reporting period is the Authority's calendar, identical for everyone who must file against it.",
   'GET /api/v1/feeds/:id/runs':
     'a feed hangs off a sharing agreement rather than an entity; its own spec covers agreement scoping.',
+};
+
+/**
+ * Routes that are entity-owned and are probed, but in another spec, with where and why.
+ *
+ * Not an excuse list. Each entry names the file and the exact test that does the A-against-B check
+ * with a positive control, and a test below fails if that file or that test ever disappears, so a
+ * pointer cannot quietly outlive the check it points at.
+ *
+ * The reason is always the same kind: the record cannot be fixtured here. This suite rebuilds its
+ * two operators by deleting them on every run, and some records are deliberately undeletable.
+ */
+const PROBED_ELSEWHERE: Record<string, { spec: string; test: string; why: string }> = {
+  'GET /api/v1/payments/:id/receipt.pdf': {
+    spec: 'payments.e2e-spec.ts',
+    test: "can download its own receipt, and not anybody else's",
+    why:
+      'a payment can never be deleted, by the application or in the database, so it cannot be ' +
+      'fixtured in a suite that cleans up by deletion. payments.e2e-spec.ts owns its fixtures for ' +
+      'that reason, and checks the own receipt opens and the other operator is refused.',
+  },
 };
 
 describe('data segregation, swept across every route that takes an id (e2e)', () => {
@@ -761,7 +784,9 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
   it('has an answer for every route that takes an id', () => {
     const unanswered = routesUnderTest()
       .map((r) => r.signature)
-      .filter((sig) => !(sig in PROBES) && !(sig in NOT_ENTITY_SCOPED));
+      .filter(
+        (sig) => !(sig in PROBES) && !(sig in NOT_ENTITY_SCOPED) && !(sig in PROBED_ELSEWHERE),
+      );
 
     if (unanswered.length > 0) {
       throw new Error(
@@ -774,13 +799,26 @@ describe('data segregation, swept across every route that takes an id (e2e)', ()
 
   it('probes nothing that no longer exists', () => {
     const live = new Set(routesUnderTest().map((r) => r.signature));
-    const stale = [...Object.keys(PROBES), ...Object.keys(NOT_ENTITY_SCOPED)].filter(
-      (sig) => !live.has(sig),
-    );
+    const stale = [
+      ...Object.keys(PROBES),
+      ...Object.keys(NOT_ENTITY_SCOPED),
+      ...Object.keys(PROBED_ELSEWHERE),
+    ].filter((sig) => !live.has(sig));
 
     if (stale.length > 0) {
       throw new Error(`These are probed but no longer served:\n  ${stale.join('\n  ')}`);
     }
+  });
+
+  it('points only at probes that still exist', () => {
+    // A pointer to another spec is only worth as much as the test at the other end of it.
+    const missing = Object.entries(PROBED_ELSEWHERE)
+      .filter(([, where]) => {
+        const path = join(__dirname, where.spec);
+        return !existsSync(path) || !readFileSync(path, 'utf8').includes(where.test);
+      })
+      .map(([sig, where]) => `${sig} -> ${where.spec}: "${where.test}"`);
+    expect(missing).toEqual([]);
   });
 
   describe('every probe', () => {

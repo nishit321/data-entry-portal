@@ -31,6 +31,13 @@ export interface SheetColumn {
   numFmt?: string;
 }
 
+/** An SSP amount as every generated document writes it, or a plain word where there is none. */
+export function moneyLabel(value: number | null): string {
+  return value === null
+    ? 'Not calculated'
+    : `SSP ${value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** `levy-assessment-2026-08-21.xlsx` — the subject and the day it was taken. */
 export function exportFilename(subject: string, extension: string): string {
   return `${subject}-${new Date().toISOString().slice(0, 10)}.${extension}`;

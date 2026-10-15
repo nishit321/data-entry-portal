@@ -110,6 +110,8 @@ enum AuditAction {
   PENALTY_RULE_UPDATED
   PENALTY_RULE_DELETED
   SETTING_UPDATED
+  PAYMENT_RECORDED
+  PAYMENT_REVERSED
   PUBLIC_INDICATOR_CREATED
   PUBLIC_INDICATOR_UPDATED
   PUBLIC_INDICATOR_DELETED
@@ -642,9 +644,11 @@ model User {
   apiCredential            ApiClient?           @relation("ApiClientServiceUser")
   signingCertificates      SigningCertificate[] @relation("UserSigningCertificates")
 
-  draftedOrders  EnforcementOrder[] @relation("OrderDraftedBy")
-  approvedOrders EnforcementOrder[] @relation("OrderApprovedBy")
-  revokedOrders  EnforcementOrder[] @relation("OrderRevokedBy")
+  draftedOrders    EnforcementOrder[] @relation("OrderDraftedBy")
+  approvedOrders   EnforcementOrder[] @relation("OrderApprovedBy")
+  revokedOrders    EnforcementOrder[] @relation("OrderRevokedBy")
+  paymentsRecorded Payment[]          @relation("PaymentRecordedBy")
+  paymentsReversed Payment[]          @relation("PaymentReversedBy")
 
   @@index([role])
   @@index([isActive])
@@ -688,6 +692,7 @@ model Entity {
   apiClients       ApiClient[]
   agreements       DataSharingAgreement[]
   feedMetrics      FeedMetric[]
+  payments         Payment[]
 
   @@index([type])
   @@index([status])
@@ -891,6 +896,7 @@ model ReportingPeriod {
 
   submissions      Submission[]
   enforcementCases EnforcementCase[]
+  payments         Payment[]
 
   @@unique([templateId, frequency, label])
   @@index([templateId])
@@ -1151,7 +1157,8 @@ model EnforcementCase {
   remedyNoticeAt DateTime? @map("remedy_notice_at")
   remedyDueAt    DateTime? @map("remedy_due_at")
 
-  orders EnforcementOrder[]
+  orders   EnforcementOrder[]
+  payments Payment[]
 
   // A case is a child record of its entity and period — it cannot outlive them. (In production
   // entities/periods are soft-deleted, never removed, so this cascade only matters to test teardown.)
@@ -1374,6 +1381,86 @@ model SystemSetting {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("system_settings")
+}
+
+/// What a payment settles.
+enum PaymentKind {
+  /// One reporting period's levy, for one operator.
+  LEVY
+  /// The assessed penalty on one compliance case.
+  PENALTY
+
+  @@map("payment_kind")
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CHEQUE
+  MOBILE_MONEY
+
+  @@map("payment_method")
+}
+
+/// Money the Authority has received, recorded against the one charge it settles (NCA, October
+/// 2026: "amounts paid, outstanding balances, and payment rates").
+///
+/// The portal assessed levies and penalties and had no record of anybody paying them. The choices
+/// made here, written down because NCA was not asked:
+///
+/// - **Recorded by the Authority, against the bank statement.** An operator saying it has paid is
+///   not evidence that it has. Operators see their own payments and balances; they do not enter
+///   them.
+/// - **Against one charge, not into an account.** A payment settles a period's levy or a case's
+///   penalty, so "is the 2026 Q1 levy paid?" always has an answer. A running balance cannot say
+///   which debt a payment was for.
+/// - **Recorded as received.** Part payments are allowed, and so are overpayments, which show as
+///   overpaid: the record has to match the bank, not tidy itself up.
+/// - **Never edited, never deleted.** A mistake is reversed, with a reason, by somebody other than
+///   the person who recorded it, and the reversed payment stays visible. The database enforces
+///   this as well as the application (see the migration that creates this table).
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// NCA/RCT/2026/000001, issued when the payment is recorded.
+  receiptNumber String @unique @map("receipt_number")
+
+  entityId String      @map("entity_id") @db.Uuid
+  kind     PaymentKind
+
+  /// Set for a levy payment: the period whose levy this settles.
+  periodId          String? @map("period_id") @db.Uuid
+  /// Set for a penalty payment: the case whose penalty this settles.
+  enforcementCaseId String? @map("enforcement_case_id") @db.Uuid
+
+  /// SSP, as received.
+  amount        Decimal       @db.Decimal(18, 2)
+  /// The day the money arrived, as the bank statement shows it.
+  paidOn        DateTime      @map("paid_on") @db.Date
+  method        PaymentMethod
+  /// The bank's or mobile money provider's reference: the evidence that the money arrived.
+  bankReference String        @map("bank_reference")
+  note          String?
+
+  recordedById String   @map("recorded_by_id") @db.Uuid
+  recordedAt   DateTime @default(now()) @map("recorded_at")
+
+  reversedAt     DateTime? @map("reversed_at")
+  reversedById   String?   @map("reversed_by_id") @db.Uuid
+  reversalReason String?   @map("reversal_reason")
+
+  // Restrict throughout: a payment is a financial record and outlives nothing it refers to. In
+  // production none of these are ever hard-deleted; they are soft-deleted, and so stay referable.
+  entity          Entity           @relation(fields: [entityId], references: [id], onDelete: Restrict)
+  period          ReportingPeriod? @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  enforcementCase EnforcementCase? @relation(fields: [enforcementCaseId], references: [id], onDelete: Restrict)
+  recordedBy      User             @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: Restrict)
+  reversedBy      User?            @relation("PaymentReversedBy", fields: [reversedById], references: [id], onDelete: Restrict)
+
+  @@index([entityId])
+  @@index([periodId])
+  @@index([enforcementCaseId])
+  @@index([paidOn])
+  @@map("payments")
 }
 
 model LevyRate {

@@ -26,6 +26,8 @@ import {
   FlowOrStock,
   NetworkSiteKind,
   NetworkSiteStatus,
+  PaymentKind,
+  PaymentMethod,
   PeriodStatus,
   Prisma,
   PublicAggregation,
@@ -996,6 +998,215 @@ async function main() {
   await seedNetwork();
   await seedEnforcement();
   await seedAgentRegister();
+  await seedPayments();
+}
+
+/**
+ * The levy for one approved return, worked out the way the levy screen works it out: the answers
+ * to the levy-basis questions, at the rate whose window covers the period's due date.
+ *
+ * Mirrored rather than approximated. The demo pays some levies in full, and a payment that was
+ * "in full" by a slightly different sum would show on the Payments screen as part paid or overpaid,
+ * which is exactly the kind of small wrongness a client notices in a demonstration.
+ */
+async function levyDueFor(entityId: string, periodId: string): Promise<number | null> {
+  const period = await prisma.reportingPeriod.findUnique({
+    where: { id: periodId },
+    select: { dueDate: true },
+  });
+  if (!period) return null;
+  const rate = await prisma.levyRate.findFirst({
+    where: {
+      deletedAt: null,
+      effectiveFrom: { lte: period.dueDate },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: period.dueDate } }],
+    },
+    orderBy: { effectiveFrom: 'desc' },
+    select: { ratePercent: true },
+  });
+  if (!rate) return null;
+  const submission = await prisma.submission.findFirst({
+    where: {
+      entityId,
+      periodId,
+      status: SubmissionStatus.APPROVED,
+      deletedAt: null,
+      supersededBy: null,
+    },
+    select: { values: { where: { field: { isLevyBasis: true } }, select: { valueText: true } } },
+  });
+  if (!submission) return null;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const revenue = round2(submission.values.reduce((sum, v) => sum + (Number(v.valueText) || 0), 0));
+  return round2((revenue * Number(rate.ratePercent)) / 100);
+}
+
+/**
+ * A few months of payments, so the Payments screen has a story to tell.
+ *
+ * The demo operator has paid one quarter's levy in full and part of the next, and nothing of its
+ * payable penalty; one payment was keyed twice and the second keying was reversed by a different
+ * officer. Another operator is paid up, so the table by operator has a contrast in it.
+ *
+ * Seeds a levy rate first if there is none, because without one no levy is assessed and there is
+ * nothing to pay. Payments can never be deleted, so this skips itself on a database that already
+ * has demo payments rather than piling up a second set.
+ */
+async function seedPayments() {
+  const demo = await prisma.entity.findFirst({
+    where: { licenceNumber: 'NCA/MNO/2026/001', deletedAt: null },
+    select: { id: true },
+  });
+  if (!demo) {
+    console.log('Demo operator not seeded yet, skipping payments.');
+    return;
+  }
+  if ((await prisma.payment.count({ where: { entityId: demo.id } })) > 0) {
+    console.log('Demo payments already exist, leaving them as they are.');
+    return;
+  }
+
+  if ((await prisma.levyRate.count({ where: { deletedAt: null } })) === 0) {
+    await prisma.levyRate.create({
+      data: {
+        ratePercent: 1.5,
+        effectiveFrom: new Date('2025-01-01'),
+        label: 'Demonstration rate, 1.5% of revenue',
+      },
+    });
+    console.log('Seeded a demonstration levy rate of 1.5%.');
+  }
+
+  const admin = await prisma.user.findFirst({ where: { role: Role.ADMIN, deletedAt: null } });
+  const supervisor = await prisma.user.findFirst({
+    where: { role: Role.SUPERVISOR, deletedAt: null },
+  });
+  if (!admin || !supervisor) {
+    console.log('No administrator and supervisor pair, so the demo payments were skipped.');
+    return;
+  }
+
+  // The demo operator's approved quarters, oldest first.
+  const quarters = await prisma.submission.findMany({
+    where: {
+      entityId: demo.id,
+      status: SubmissionStatus.APPROVED,
+      deletedAt: null,
+      supersededBy: null,
+    },
+    select: { periodId: true, period: { select: { dueDate: true } } },
+    orderBy: { period: { dueDate: 'asc' } },
+  });
+
+  const year = new Date().getFullYear();
+  let seq = await prisma.payment.count({
+    where: { receiptNumber: { startsWith: `NCA/RCT/${year}/` } },
+  });
+  const receipt = () => {
+    seq += 1;
+    return `NCA/RCT/${year}/${String(seq).padStart(6, '0')}`;
+  };
+  const daysAfter = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
+  const asDate = (d: Date) => new Date(`${d.toISOString().slice(0, 10)}T00:00:00.000Z`);
+
+  let made = 0;
+  const [first, second] = quarters;
+
+  if (first) {
+    const due = await levyDueFor(demo.id, first.periodId);
+    if (due) {
+      // Paid in full, a fortnight after the deadline.
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: demo.id,
+          kind: PaymentKind.LEVY,
+          periodId: first.periodId,
+          amount: due,
+          paidOn: asDate(daysAfter(first.period.dueDate, 14)),
+          method: PaymentMethod.BANK_TRANSFER,
+          bankReference: 'FT25DEMO0001',
+          recordedById: admin.id,
+        },
+      });
+      made += 1;
+    }
+  }
+
+  if (second) {
+    const due = await levyDueFor(demo.id, second.periodId);
+    if (due) {
+      const paidOn = asDate(daysAfter(second.period.dueDate, 20));
+      const part = Math.round(due * 0.6 * 100) / 100;
+      // Sixty per cent, with a note that the rest was promised.
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: demo.id,
+          kind: PaymentKind.LEVY,
+          periodId: second.periodId,
+          amount: part,
+          paidOn,
+          method: PaymentMethod.BANK_TRANSFER,
+          bankReference: 'FT26DEMO0002',
+          note: 'The operator wrote to say the balance follows at the end of the month.',
+          recordedById: supervisor.id,
+        },
+      });
+      // The same line of the statement keyed a second time, and reversed by somebody else.
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: demo.id,
+          kind: PaymentKind.LEVY,
+          periodId: second.periodId,
+          amount: part,
+          paidOn,
+          method: PaymentMethod.BANK_TRANSFER,
+          bankReference: 'FT26DEMO0002-X',
+          recordedById: admin.id,
+          reversedAt: daysAfter(paidOn, 1),
+          reversedById: supervisor.id,
+          reversalReason: 'Keyed twice from the same line of the bank statement.',
+        },
+      });
+      made += 2;
+    }
+  }
+
+  // Another operator, paid up, so the table by operator has something to compare with.
+  const other = await prisma.submission.findFirst({
+    where: {
+      entityId: { not: demo.id },
+      status: SubmissionStatus.APPROVED,
+      deletedAt: null,
+      supersededBy: null,
+      entity: { deletedAt: null, type: EntityType.MNO },
+    },
+    select: { entityId: true, periodId: true, period: { select: { dueDate: true } } },
+    orderBy: { period: { dueDate: 'asc' } },
+  });
+  if (other) {
+    const due = await levyDueFor(other.entityId, other.periodId);
+    if (due) {
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: other.entityId,
+          kind: PaymentKind.LEVY,
+          periodId: other.periodId,
+          amount: due,
+          paidOn: asDate(daysAfter(other.period.dueDate, -3)),
+          method: PaymentMethod.MOBILE_MONEY,
+          bankReference: 'MM25DEMO0101',
+          recordedById: supervisor.id,
+        },
+      });
+      made += 1;
+    }
+  }
+
+  console.log(`Seeded ${made} demo payments.`);
 }
 
 main()
