@@ -243,4 +243,139 @@ describe('Templates (e2e)', () => {
     expect(v2.body.rules).toHaveLength(1);
     expect(v2.body.rules[0].type).toBe('LESS_OR_EQUAL');
   });
+
+  describe('retiring a questionnaire', () => {
+    /*
+     * Archiving a template, and bringing one back (NCA, 15 October 2026).
+     *
+     * Before this, archiving only ever happened as a side effect of publishing a new version, and
+     * nothing could undo it. A questionnaire the Authority had simply stopped using had to be
+     * deleted instead - and deleting is refused the moment one return points at it, which for any
+     * questionnaire that was ever used is always. So there was no way to retire one at all.
+     */
+    const retiredName = 'E2E Retired Template';
+
+    async function draft(name: string) {
+      const res = await request(server)
+        .post('/api/v1/templates')
+        .set(auth(adminToken))
+        .send({ name, description: 'For archiving' })
+        .expect(201);
+      return res.body.id as string;
+    }
+
+    afterEach(async () => {
+      await prisma.reportingPeriod.deleteMany({ where: { template: { name: retiredName } } });
+      await prisma.reportingTemplate.deleteMany({ where: { name: retiredName } });
+    });
+
+    it('takes one out of use and brings it back as a draft', async () => {
+      const id = await draft(retiredName);
+
+      const archived = await request(server)
+        .post(`/api/v1/templates/${id}/archive`)
+        .set(auth(adminToken))
+        .expect(200);
+      expect(archived.body.status).toBe('ARCHIVED');
+
+      /*
+       * Back as a draft, never straight to published. Two published versions of one questionnaire
+       * cannot both be in force: a reporting period binds to one of them, and "the current
+       * version" would stop having an answer. Publishing it again is a deliberate act with its
+       * own checks.
+       */
+      const restored = await request(server)
+        .post(`/api/v1/templates/${id}/restore`)
+        .set(auth(adminToken))
+        .expect(200);
+      expect(restored.body.status).toBe('DRAFT');
+      expect(restored.body.publishedAt).toBeNull();
+    });
+
+    it('refuses to archive one that operators are still filing against', async () => {
+      /*
+       * An open period is a deadline somebody is working to. Retiring the questionnaire underneath
+       * them would leave them mid-return against something that no longer exists as far as the
+       * Authority is concerned.
+       */
+      const id = await draft(retiredName);
+      const withSection = await request(server)
+        .post(`/api/v1/templates/${id}/sections`)
+        .set(auth(adminToken))
+        .send({
+          key: 's1',
+          title: 'S1',
+          applicableEntityTypes: ['MNO'],
+          frequency: 'QUARTERLY_AND_ANNUAL',
+        })
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/templates/${id}/sections/${withSection.body.sections[0].id}/fields`)
+        .set(auth(adminToken))
+        .send({ key: 'f1', label: 'F1', dataType: 'INTEGER' })
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/templates/${id}/publish`)
+        .set(auth(adminToken))
+        .expect(201);
+
+      const period = await request(server)
+        .post('/api/v1/reporting-periods')
+        .set(auth(adminToken))
+        .send({
+          templateId: id,
+          frequency: 'QUARTERLY',
+          label: '2026 Q4 retire-test',
+          periodStart: '2026-10-01',
+          periodEnd: '2026-12-31',
+          dueDate: '2027-01-15',
+        })
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/reporting-periods/${period.body.id}/open`)
+        .set(auth(adminToken))
+        .expect(201);
+
+      const refused = await request(server)
+        .post(`/api/v1/templates/${id}/archive`)
+        .set(auth(adminToken))
+        .expect(400);
+      // Named, so the administrator knows which period to deal with rather than hunting for it.
+      expect(refused.body.message).toContain('2026 Q4 retire-test');
+
+      // And it works once that period is closed.
+      await request(server)
+        .post(`/api/v1/reporting-periods/${period.body.id}/close`)
+        .set(auth(adminToken))
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/templates/${id}/archive`)
+        .set(auth(adminToken))
+        .expect(200);
+    });
+
+    it('will not archive the same one twice, or restore one that is in use', async () => {
+      // Both are no-ops dressed as actions, and a button that silently does nothing is worse than
+      // one that says why it cannot.
+      const id = await draft(retiredName);
+      await request(server)
+        .post(`/api/v1/templates/${id}/restore`)
+        .set(auth(adminToken))
+        .expect(400);
+      await request(server)
+        .post(`/api/v1/templates/${id}/archive`)
+        .set(auth(adminToken))
+        .expect(200);
+      await request(server)
+        .post(`/api/v1/templates/${id}/archive`)
+        .set(auth(adminToken))
+        .expect(400);
+    });
+
+    it("is an administrator's decision", async () => {
+      const id = await draft(retiredName);
+      await request(server).post(`/api/v1/templates/${id}/archive`).expect(401);
+      await request(server).post(`/api/v1/templates/${id}/archive`).set(auth(opToken)).expect(403);
+    });
+  });
 });

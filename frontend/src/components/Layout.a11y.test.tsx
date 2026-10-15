@@ -38,6 +38,12 @@ vi.mock('./layout/useNavCounts', () => ({
   useNavCounts: () => ({}),
 }));
 
+// The shell now carries the idle-session clock, which asks the server how long the window is.
+// Mocked like the others above: this file is about the markup, not about what the network says.
+vi.mock('../hooks/usePublicSettings', () => ({
+  usePublicSettings: () => ({ isLoading: false, signupEnabled: false, idleMinutes: 20 }),
+}));
+
 vi.mock('./layout/NotificationBell', () => ({
   NotificationBell: () => <button type="button">Notifications</button>,
 }));

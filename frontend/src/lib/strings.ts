@@ -71,4 +71,24 @@ export const strings = {
     email: 'you@example.com',
     oneTimeCode: '123456',
   },
+
+  /**
+   * Who this portal belongs to.
+   *
+   * These had drifted into three spellings: the sign-in panel and the footer said "National
+   * Communication Authority, South Sudan", the emails said "Republic of South Sudan", and the
+   * header stamped onto every printed sheet said "National Communications Authority" - which is
+   * not the Authority's name. Printed sheets are the ones that end up in case files, so that was
+   * the worst place for it.
+   *
+   * The seal settles it rather than anybody's preference. Its ring reads NATIONAL COMMUNICATION
+   * AUTHORITY, and beneath that REPUBLIC OF SOUTH SUDAN.
+   */
+  brand: {
+    authority: 'National Communication Authority',
+    authorityFull: 'National Communication Authority, Republic of South Sudan',
+    portal: 'NCA Data Collection Portal',
+    portalShort: 'NCA Portal',
+    portalTagline: 'Data Collection',
+  },
 } as const;

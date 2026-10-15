@@ -30,11 +30,28 @@ const UI_TEST_DB =
   process.env.UI_TEST_DATABASE_URL ??
   'postgresql://postgres:root@localhost:5432/nca_portal_uitest?schema=public';
 
-const API_PORT = 4100;
-const WEB_PORT = 4173;
+// Overridable so a second session can bring up its own stack beside the default one rather
+// than fighting it for the ports. Defaults unchanged, so an ordinary run is unaffected.
+const API_PORT = Number(process.env.UI_TEST_API_PORT ?? '4100');
+const WEB_PORT = Number(process.env.UI_TEST_WEB_PORT ?? '4173');
 
 export const API_URL = `http://localhost:${API_PORT}/api/v1`;
 export const WEB_URL = `http://localhost:${WEB_PORT}`;
+
+/**
+ * Reuse a stack that is already up, instead of starting one.
+ *
+ * Off by default, and it must stay that way: the backend rebuilds its database as it starts,
+ * which is what makes a run repeatable, and reusing a stack skips that.
+ *
+ * It exists because two people working in this repository at once cannot both have the browser
+ * suite running. There is one pair of ports and one `dist/`, so the second run either dies on
+ * EADDRINUSE or, worse, half-starts and the first run loses its preview server mid-test. Set
+ * `UI_TEST_REUSE_SERVER=1` to run **read-only** checks (layout, labelling, conventions) against
+ * whichever stack is already serving. Never set it for the journey specs: they write, and they
+ * need the database they were given.
+ */
+const REUSE = process.env.UI_TEST_REUSE_SERVER === '1';
 
 export default defineConfig({
   testDir: './e2e',
@@ -82,7 +99,7 @@ export default defineConfig({
       command: 'npm run db:reset:test && npm run prisma:seed && npm run start',
       cwd: '../backend',
       url: `http://localhost:${API_PORT}/api/health`,
-      reuseExistingServer: false,
+      reuseExistingServer: REUSE,
       timeout: 180_000,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -100,7 +117,7 @@ export default defineConfig({
     {
       command: `npm run build && npx vite preview --port ${WEB_PORT} --strictPort`,
       url: WEB_URL,
-      reuseExistingServer: false,
+      reuseExistingServer: REUSE,
       timeout: 180_000,
       env: { VITE_API_URL: API_URL },
     },

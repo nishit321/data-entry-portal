@@ -40,6 +40,7 @@ const OPERATOR_PAGES = [
   ['agents', '/agents'],
   ['documents', '/documents'],
   ['revenue and levy', '/levy'],
+  ['payments', '/payments'],
 ] as const;
 
 test.describe('signed in as an operator', () => {

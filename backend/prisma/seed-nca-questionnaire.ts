@@ -90,7 +90,7 @@ async function assertServiceCodesExist(t: TemplateDef): Promise<void> {
     throw new Error(
       `These sections are gated on service codes that are not in the reference data, so no ` +
         `operator would ever be shown them: ${missing.join(', ')}. ` +
-        `Run \`npm run prisma:seed\` first: it seeds the SERVICE_TYPE list.`,
+        'Run `npm run seed:production` first: it seeds the SERVICE_TYPE list.',
     );
   }
 }

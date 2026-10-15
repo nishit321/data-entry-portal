@@ -4,10 +4,12 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
   HttpException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { SettingsService } from '../settings/settings.service';
 import { JwtService } from '@nestjs/jwt';
 import { AuditAction, MfaMethod, Role, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -75,16 +77,60 @@ export class AuthService {
     private readonly mail: MailService,
     private readonly audit: AuditService,
     private readonly totp: TotpService,
+    private readonly settings: SettingsService,
     @Inject(SMS_PROVIDER) private readonly sms: SmsProvider,
   ) {}
 
-  private signToken(user: Pick<User, 'id' | 'email' | 'role' | 'entityId'>): string {
-    return this.jwt.sign({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      entityId: user.entityId,
+  /**
+   * How much longer than the idle window a token is allowed to live.
+   *
+   * The browser signs somebody out when they have been idle this long, and renews the token
+   * quietly while they are working. The few extra minutes are slack for a renewal that happens to
+   * be in flight when the clock runs out, and for the two clocks not being exactly the same one.
+   * It is not a second timeout: nothing keeps renewing a session nobody is using.
+   */
+  private static readonly TOKEN_GRACE_MINUTES = 5;
+
+  /**
+   * An access token, dated from the idle timeout rather than from a separate setting.
+   *
+   * These were two numbers until the two could disagree. The portal signed tokens that lived a
+   * day, so a token copied off a shared machine was good until tomorrow; and if the lifetime were
+   * configured apart from the idle window, an administrator who set the window to two hours would
+   * still have people thrown out at whatever the token said, with nothing on screen to explain it.
+   *
+   * One number, therefore, and the token outlives the window by a known margin.
+   */
+  private async signToken(user: Pick<User, 'id' | 'email' | 'role' | 'entityId'>): Promise<string> {
+    const idleMinutes = await this.settings.getNumber('session.idleMinutes');
+    return this.jwt.sign(
+      {
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        entityId: user.entityId,
+      },
+      { expiresIn: `${idleMinutes + AuthService.TOKEN_GRACE_MINUTES}m` },
+    );
+  }
+
+  /**
+   * A fresh token for somebody who is still working.
+   *
+   * Requires a token that is valid right now, so it can only ever extend a live session, never
+   * revive a dead one: an expired token is rejected by the guard before this is reached. That is
+   * what makes it safe without a second, longer-lived refresh credential to look after.
+   *
+   * The user is re-read rather than copied out of the token. A session that is renewed every few
+   * minutes would otherwise carry a role or an operator link that was changed hours ago, which is
+   * the one thing a long-lived session must not do.
+   */
+  async refresh(userId: string): Promise<AuthResult> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null, isActive: true },
     });
+    if (!user) throw new UnauthorizedException('Your account is no longer active.');
+    return { accessToken: await this.signToken(user), user: this.toPublicUser(user) };
   }
 
   private toPublicUser(u: User): PublicUser {
@@ -106,6 +152,19 @@ export class AuthService {
    * internal/elevated roles are assigned afterwards by an ADMIN.
    */
   async signup(dto: SignupDto, ctx: RequestContext): Promise<AuthResult> {
+    /*
+     * The gate, on the server, before anything else.
+     *
+     * The sign-in screen stops offering to create an account when this is off, but that is only
+     * the invitation being withdrawn. The route is public and anybody who knows it is there can
+     * still post to it, so the refusal has to live here rather than in the button.
+     */
+    if (!(await this.settings.getBoolean('signup.enabled'))) {
+      throw new ForbiddenException(
+        'Accounts on this portal are created by the Authority. Contact the Authority to be set up.',
+      );
+    }
+
     const email = dto.email.toLowerCase();
     const existing = await this.prisma.user.findFirst({ where: { email, deletedAt: null } });
     if (existing) {
@@ -130,7 +189,7 @@ export class AuthService {
       context: ctx,
     });
 
-    return { accessToken: this.signToken(user), user: this.toPublicUser(user) };
+    return { accessToken: await this.signToken(user), user: this.toPublicUser(user) };
   }
 
   /**
@@ -454,7 +513,7 @@ export class AuthService {
       entityId: user.id,
       context: ctx,
     });
-    return { accessToken: this.signToken(user), user: this.toPublicUser(user) };
+    return { accessToken: await this.signToken(user), user: this.toPublicUser(user) };
   }
 
   async me(userId: string): Promise<PublicUser> {

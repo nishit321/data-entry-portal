@@ -23,11 +23,15 @@ describe('Analytics (e2e)', () => {
   const emails = [adminEmail, opAEmail, opBEmail];
   const licences = ['E2E/ANA', 'E2E/ANB'];
   const tplName = 'E2E Analytics Template';
+  // A questionnaire addressed to somebody else, so "who owes a return" can be shown to depend on
+  // the operator's type rather than just on the period existing.
+  const ispTplName = 'E2E Analytics ISP Template';
 
   let adminToken: string;
   let opAToken: string;
   let opBToken: string;
   let templateId: string;
+  let ispTemplateId: string;
 
   async function login(email: string): Promise<string> {
     const res = await request(server)
@@ -42,8 +46,10 @@ describe('Analytics (e2e)', () => {
 
   async function cleanup() {
     await prisma.submission.deleteMany({ where: { entity: { licenceNumber: { in: licences } } } });
-    await prisma.reportingPeriod.deleteMany({ where: { template: { name: tplName } } });
-    await prisma.reportingTemplate.deleteMany({ where: { name: tplName } });
+    await prisma.reportingPeriod.deleteMany({
+      where: { template: { name: { in: [tplName, ispTplName] } } },
+    });
+    await prisma.reportingTemplate.deleteMany({ where: { name: { in: [tplName, ispTplName] } } });
     await prisma.user.deleteMany({ where: { email: { in: emails } } });
     await prisma.entity.deleteMany({ where: { licenceNumber: { in: licences } } });
   }
@@ -110,9 +116,37 @@ describe('Analytics (e2e)', () => {
         version: 1,
         status: TemplateStatus.PUBLISHED,
         publishedAt: new Date(),
+        // The section is what puts an operator on the hook, so the trend has a denominator.
+        sections: {
+          create: { key: 'main', title: 'Main', applicableEntityTypes: [EntityType.MNO] },
+        },
       },
     });
     templateId = tpl.id;
+
+    const ispTpl = await prisma.reportingTemplate.create({
+      data: {
+        name: ispTplName,
+        version: 1,
+        status: TemplateStatus.PUBLISHED,
+        publishedAt: new Date(),
+        sections: {
+          create: { key: 'main', title: 'Main', applicableEntityTypes: [EntityType.ISP] },
+        },
+      },
+    });
+    ispTemplateId = ispTpl.id;
+    await prisma.reportingPeriod.create({
+      data: {
+        templateId: ispTpl.id,
+        frequency: 'QUARTERLY',
+        label: '2026 Q1 ISP',
+        periodStart: new Date('2026-01-01'),
+        periodEnd: new Date('2026-03-31'),
+        dueDate: new Date('2026-04-15'),
+        status: 'CLOSED',
+      },
+    });
     const p1 = await prisma.reportingPeriod.create({
       data: {
         templateId: tpl.id,
@@ -235,4 +269,64 @@ describe('Analytics (e2e)', () => {
     const q2 = res.body.periods.find((p: { label: string }) => p.label === '2026 Q2');
     expect(q2).toMatchObject({ filed: 1, onTime: 0, late: 1, rejected: 1 });
   });
+
+  const trends = async (token: string, tpl: string) =>
+    (
+      await request(server)
+        .get('/api/v1/analytics/trends')
+        .query({ periods: 8, templateId: tpl })
+        .set(auth(token))
+        .expect(200)
+    ).body.periods as TrendPoint[];
+
+  it('counts what an operator owed, not what the sector owed', async () => {
+    /*
+     * The denominator has to be scoped the same way the numerator is. An operator looking at their
+     * own chart should see "one return owed, one filed", not "one filed of the forty the sector
+     * owed", which would make a fully compliant operator look like a delinquent one.
+     */
+    const [q1] = await trends(opAToken, templateId);
+    expect(q1).toMatchObject({ label: '2026 Q1', filed: 1, expected: 1, notFiled: 0 });
+  });
+
+  it('shows a return that was never filed at all, which no status count can', () => {
+    /*
+     * Operator B filed for Q1 and nothing for Q2. Every status figure on the portal is silent about
+     * that second period: there is no row to count. This is the number that speaks for it, and it
+     * is the reason the denominator was added.
+     */
+    return trends(opBToken, templateId).then((periods) => {
+      const q2 = periods.find((p) => p.label === '2026 Q2');
+      expect(q2).toMatchObject({ filed: 0, expected: 1, notFiled: 1 });
+    });
+  });
+
+  it('obliges nobody it does not address', async () => {
+    // A mobile operator owes nothing on a questionnaire written for internet providers, so the
+    // period is in their chart with an empty obligation rather than a missed one.
+    const [q1] = await trends(opAToken, ispTemplateId);
+    expect(q1).toMatchObject({ label: '2026 Q1 ISP', expected: 0, notFiled: 0 });
+  });
+
+  it("counts the whole sector's obligation for the Authority", async () => {
+    /*
+     * Not an exact figure: every active mobile operator in the database owes this return, and other
+     * suites create their own. What must hold is that the Authority sees at least this suite's two
+     * operators where an operator sees one, and that the arithmetic ties.
+     */
+    const periods = await trends(adminToken, templateId);
+    const q1 = periods.find((p) => p.label === '2026 Q1')!;
+    expect(q1.expected).toBeGreaterThanOrEqual(2);
+    expect(q1.filed).toBe(2);
+    expect(q1.notFiled).toBe(q1.expected - q1.filed);
+  });
 });
+
+type TrendPoint = {
+  label: string;
+  filed: number;
+  onTime: number;
+  late: number;
+  expected: number;
+  notFiled: number;
+};

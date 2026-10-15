@@ -80,6 +80,20 @@ export class AuthController {
   }
 
   /*
+   * Extending a session that is still in use. No @Roles(): a session belongs to whoever holds it,
+   * and every signed-in user renews their own and nobody else's.
+   *
+   * The guard has already rejected an expired token by the time this runs, so this can only
+   * lengthen a live session, never revive a dead one. Recorded with that reason in
+   * test/route-inventory.e2e-spec.ts.
+   */
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  refresh(@CurrentUser('id') userId: string) {
+    return this.auth.refresh(userId);
+  }
+
+  /*
    * A phone number is the caller's own, so these carry no @Roles(): every signed-in user may set
    * their own and nobody else's. Recorded with that reason in test/route-inventory.e2e-spec.ts.
    */

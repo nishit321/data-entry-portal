@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SettingsModule } from '../settings/settings.module';
 import { PublicPortalController } from './public-portal.controller';
 import { PublicPortalService } from './public-portal.service';
 import { PublicIndicatorsController } from './public-indicators.controller';
@@ -11,6 +12,7 @@ import { PublicExportsService } from './public-exports.service';
  * publishes it.
  */
 @Module({
+  imports: [SettingsModule],
   controllers: [PublicPortalController, PublicIndicatorsController],
   providers: [PublicPortalService, PublicIndicatorsService, PublicExportsService],
   exports: [PublicPortalService],

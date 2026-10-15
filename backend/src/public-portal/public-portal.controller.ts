@@ -36,6 +36,20 @@ export class PublicPortalController {
     return this.portal.indicators(query);
   }
 
+  /**
+   * The licensed operators, for the complaint form's "who is this about?" field.
+   *
+   * Throttled like the other public reads. It is a short, cacheable list and the only reason it
+   * exists is that the complaint desk is reached without an account, so the authenticated entity
+   * list is not available to it.
+   */
+  @Public()
+  @Get('operators')
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  operators() {
+    return this.portal.operators();
+  }
+
   @Public()
   @Get('complaints-summary')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
@@ -44,6 +58,16 @@ export class PublicPortalController {
   }
 
   /** The closed periods a reader may filter between. Labels and dates, nothing more. */
+  /*
+   * Public, because the page that reads it is. It answers `{ published: false }` and nothing more
+   * until the Authority has switched publication on; see PublicPortalService.complaintsByOperator.
+   */
+  @Public()
+  @Get('complaints-by-operator')
+  complaintsByOperator() {
+    return this.portal.complaintsByOperator();
+  }
+
   @Public()
   @Get('periods')
   @Throttle({ default: { limit: 60, ttl: 60_000 } })

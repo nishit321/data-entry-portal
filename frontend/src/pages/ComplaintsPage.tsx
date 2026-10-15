@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { strings } from '../lib/strings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, MessageSquareWarning, Paperclip, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { BarChart3, Download, MessageSquareWarning, Paperclip, Trash2 } from 'lucide-react';
 import {
   Badge,
   Button,
@@ -178,7 +179,16 @@ export function ComplaintsPage() {
   return (
     <ListShell
       header={
-        <PageHeader description="Complaints and suggestions filed by the public. Open a case to see the full report and record what was done." />
+        <PageHeader
+          description="Complaints and suggestions filed by the public. Open a case to see the full report and record what was done."
+          actions={
+            <Link to="/complaints/by-operator">
+              <Button variant="secondary" icon={BarChart3}>
+                By operator
+              </Button>
+            </Link>
+          }
+        />
       }
       search={{
         value: list.search,

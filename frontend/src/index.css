@@ -189,7 +189,12 @@ body {
 
   /* Placed by `usePrintHeader`, and only ever visible here. */
   .print-header {
-    display: block !important;
+    /* The seal sits beside the wording, so this is a row. `!important` because the screen rule
+       below hides it, and the component must not carry an inline display that would win over
+       both. */
+    display: flex !important;
+    align-items: flex-start;
+    gap: 4mm;
     margin-bottom: 8mm;
     border-bottom: 1px solid #000;
     padding-bottom: 3mm;

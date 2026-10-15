@@ -8,7 +8,10 @@ import {
   ClipboardList,
   FileEdit,
 } from 'lucide-react';
-import { Alert, Badge, Button, Card, EmptyState, Page, StatCard } from '../components/ui';
+import { Alert, Badge, Button, Card, EmptyState, Page, Skeleton, StatCard } from '../components/ui';
+import { ComplianceTrendChart } from '../components/ComplianceTrendChart';
+import { PeriodComparison } from '../components/PeriodComparison';
+import { analyticsApi, analyticsKeys } from '../lib/analytics.api';
 import { submissionsApi } from '../lib/submissions.api';
 import { workflowApi } from '../lib/workflow.api';
 import { periodsApi } from '../lib/reporting-periods.api';
@@ -18,6 +21,9 @@ import { isOperatorRole, REVIEW_STAGES, ROLE_LABELS, type Role } from '../lib/ty
 
 /** Within this many days of the due date, a period is called out rather than merely listed. */
 const DUE_SOON_DAYS = 14;
+
+/** Enough periods to show a direction, few enough to stay readable on a phone. */
+const DASHBOARD_TREND_PERIODS = 6;
 
 function daysUntil(date: string): number {
   return Math.ceil((new Date(date).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
@@ -61,6 +67,7 @@ export function DashboardPage() {
         {operator && <OperatorPanel />}
         {reviewer && <ReviewerPanel />}
         {!operator && <PeriodsPanel />}
+        {user.role !== 'CITIZEN' && <FilingTrendPanel />}
       </div>
     </Page>
   );
@@ -339,5 +346,57 @@ function PeriodsPanel() {
         )}
       </Card>
     </>
+  );
+}
+
+/**
+ * How the last few filing rounds have gone, and how the latest compares with the one before it.
+ *
+ * The tiles above answer "what is happening now". This answers "is it getting better", which is a
+ * different question and the one an administrator is usually asked to account for. The figures are
+ * scoped by the API to whoever is reading, so an operator sees their own record here rather than
+ * the sector's.
+ */
+function FilingTrendPanel() {
+  const trends = useQuery({
+    queryKey: analyticsKeys.trends({ periods: DASHBOARD_TREND_PERIODS }),
+    queryFn: () => analyticsApi.trends({ periods: DASHBOARD_TREND_PERIODS }),
+  });
+  const points = trends.data?.periods ?? [];
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">Filing over time</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            The last few reporting periods, and how the most recent compares with the one before.
+          </p>
+        </div>
+        <Link to="/analytics">
+          <Button variant="secondary" size="sm">
+            Analytics <ArrowRight size={14} className="ms-1.5" aria-hidden />
+          </Button>
+        </Link>
+      </div>
+
+      <div className="mt-4">
+        {trends.isLoading ? (
+          <Skeleton className="h-48 w-full" />
+        ) : points.length === 0 ? (
+          <EmptyState
+            icon={CalendarClock}
+            message="Nothing to chart yet. It fills in once a reporting period has been through."
+          />
+        ) : (
+          <>
+            <PeriodComparison points={points} />
+            <div className="mt-6">
+              <ComplianceTrendChart points={points} />
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }

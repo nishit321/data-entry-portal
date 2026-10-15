@@ -1,3 +1,6 @@
+import { BrandMark } from './BrandMark';
+import { strings } from '../lib/strings';
+
 /**
  * What a printed sheet says about itself.
  *
@@ -29,11 +32,19 @@ export function PrintHeader({ title, takenBy }: { title: string; takenBy?: strin
 
   return (
     <div className="print-header">
-      <div style={{ fontSize: '10pt', fontWeight: 600 }}>National Communications Authority</div>
-      <div style={{ fontSize: '14pt', fontWeight: 700, marginTop: '1mm' }}>{title}</div>
-      <div style={{ fontSize: '9pt', marginTop: '2mm' }}>
-        Printed {printedAt}
-        {takenBy ? ` by ${takenBy}` : ''}
+      {/*
+       * The seal, because a sheet that goes into a case file should look like it came from the
+       * Authority rather than from a browser. It is an `img`, not a background, so it survives the
+       * default print setting that drops background graphics.
+       */}
+      <BrandMark size={48} alt={`${strings.brand.authority} seal`} />
+      <div>
+        <div style={{ fontSize: '10pt', fontWeight: 600 }}>{strings.brand.authority}</div>
+        <div style={{ fontSize: '14pt', fontWeight: 700, marginTop: '1mm' }}>{title}</div>
+        <div style={{ fontSize: '9pt', marginTop: '2mm' }}>
+          Printed {printedAt}
+          {takenBy ? ` by ${takenBy}` : ''}
+        </div>
       </div>
     </div>
   );

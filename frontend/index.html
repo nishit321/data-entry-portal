@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCA Data Collection Portal</title>
+
+    <!--
+      The Authority's seal in the browser tab. Until now there was none, so the portal sat in a
+      row of tabs as a blank page icon.
+
+      Two files on purpose: the .ico carries 16 to 64px for the tab and for a bookmark, and the
+      PNG is there for browsers that would rather scale one themselves. Both are generated from
+      the seal; see scripts/brand-assets.py.
+    -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- The navy of the shell, so the browser chrome on a phone matches the page it is framing. -->
+    <meta name="theme-color" content="#1F3A5F" />
+    <meta
+      name="description"
+      content="Regulatory data reporting for licensed operators and the National Communication Authority, Republic of South Sudan."
+    />
   </head>
   <body>
     <div id="root"></div>

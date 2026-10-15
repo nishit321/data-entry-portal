@@ -16,6 +16,9 @@ import type { User } from '../lib/types';
  * Authority's deadline reminders go there instead — quietly, for as long as the record stands. So
  * the number is not saved until a code sent to it comes back.
  */
+/** The alert that explains why a number cannot be confirmed, when texting is switched off. */
+const GATEWAY_OFF_ID = 'phone-gateway-off';
+
 export function PhoneNumberCard({ user, onChanged }: { user: User; onChanged: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -86,7 +89,7 @@ export function PhoneNumberCard({ user, onChanged }: { user: User; onChanged: ()
         {error && <Alert tone="danger">{error}</Alert>}
 
         {gatewayOff && (
-          <Alert tone="info">
+          <Alert tone="info" id={GATEWAY_OFF_ID}>
             Text messages are not set up on this system yet, so a number cannot be confirmed.
           </Alert>
         )}
@@ -177,6 +180,10 @@ export function PhoneNumberCard({ user, onChanged }: { user: User; onChanged: ()
               type="submit"
               isLoading={startMutation.isPending}
               disabled={phone.trim().length < 6 || gatewayOff}
+              // The alert above already says why, so there is no tooltip to add (§3.14). Pointing
+              // at it makes that reason reachable from the button itself rather than only to
+              // someone who happens to be looking a few lines further up the card.
+              aria-describedby={gatewayOff ? GATEWAY_OFF_ID : undefined}
             >
               Send me a code
             </Button>

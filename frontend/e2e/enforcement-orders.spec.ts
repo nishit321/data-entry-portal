@@ -21,13 +21,6 @@ test.describe('reading the orders on a case', () => {
   test.use({ storageState: sessionFile('admin') });
 
   /** Open the case that carries the seeded orders. */
-  async function openSeededCase(page: import('@playwright/test').Page) {
-    await page.goto('/enforcement');
-    await expect(page.getByRole('heading', { name: /compliance/i })).toBeVisible();
-    await page.getByRole('row').filter({ hasText: 'Demo Telecom' }).first().click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-  }
-
   test('separates an order in force from one that is only drafted', async ({ page }) => {
     /*
      * The assertion this file exists for.
@@ -66,11 +59,33 @@ test.describe('reading the orders on a case', () => {
   test('shows the legal basis and the effective date, not only the reason', async ({ page }) => {
     // An order that cannot say what it rests on is not one an operator can answer or a court can
     // read, so the section of the Act belongs on the face of it.
-    await openSeededCase(page);
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText(/Section 42\(\d\) of the Communications Act/)).toBeVisible();
+    /*
+     * Every case for the demo operator is read, the same way the test above does it.
+     *
+     * Opening "the first row" assumed the seeded case would be first. It stops being first the
+     * moment anything opens another case for the same operator, and the suite shares one
+     * database: when the compliance check ran earlier in the same run, four new cases appeared at
+     * the top and this test read one with no orders at all.
+     */
+    await page.goto('/enforcement');
+    const rows = page.getByRole('row').filter({ hasText: 'Demo Telecom' });
+    await expect(rows.first()).toBeVisible();
+    const count = await rows.count();
+
+    const seen: string[] = [];
+    for (let i = 0; i < count; i += 1) {
+      await rows.nth(i).click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog.getByRole('heading', { name: 'Enforcement orders' })).toBeVisible();
+      seen.push(await dialog.innerText());
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+    }
+
+    const all = seen.join(' ');
+    expect(all).toMatch(/Section 42\(\d\) of the Communications Act/);
     // `\w{3,4}` because the browser shortens September to "Sept", not "Sep".
-    await expect(dialog.getByText(/takes effect \d{1,2} \w{3,4} \d{4}/)).toBeVisible();
+    expect(all).toMatch(/takes effect \d{1,2} \w{3,4} \d{4}/);
   });
 });
 

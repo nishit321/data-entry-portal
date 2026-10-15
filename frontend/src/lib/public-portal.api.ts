@@ -6,6 +6,7 @@ import type {
   PublicComplaintsSummary,
   PublicIndicator,
   PublicIndicatorReport,
+  PublicOperator,
   PublicPeriod,
   PublicPortalFilters,
 } from './types';
@@ -35,8 +36,41 @@ export interface PublishableField {
 }
 
 /** The open-data endpoints. No token is sent; these are readable by anyone. */
+/**
+ * Complaint figures per named operator on the public page.
+ *
+ * Unpublished until an administrator turns it on. When published, an operator is named only with
+ * at least `threshold` complaints in the window; the rest are counted together.
+ */
+export type PublicComplaintsByOperator =
+  | { published: false }
+  | {
+      published: true;
+      windowMonths: number;
+      threshold: number;
+      operators: {
+        name: string;
+        type: string;
+        received: number;
+        resolutionRate: number | null;
+        medianDaysToResolve: number | null;
+      }[];
+      belowThreshold: { operators: number; complaints: number };
+      unattributed: number;
+    };
+
 export const publicPortalApi = {
   overview: () => api.get<PublicOverview>('/public/overview').then((r) => r.data),
+
+  /**
+   * The licensed operators, by name, for the complaint form's "who is this about?" field.
+   *
+   * Public because the complaint desk is reached without an account. Id, name and type only: who
+   * holds a licence is public record, what they earn is not, and the endpoint carries nothing that
+   * could be joined to a figure.
+   */
+  operators: () =>
+    api.get<{ operators: PublicOperator[] }>('/public/operators').then((r) => r.data.operators),
 
   indicators: (periods?: number, filters: PublicPortalFilters = {}) =>
     api
@@ -48,6 +82,10 @@ export const publicPortalApi = {
 
   complaintsSummary: () =>
     api.get<PublicComplaintsSummary>('/public/complaints-summary').then((r) => r.data),
+
+  /** Per-operator figures, or `{ published: false }` until the Authority chooses to publish. */
+  complaintsByOperator: () =>
+    api.get<PublicComplaintsByOperator>('/public/complaints-by-operator').then((r) => r.data),
 
   /**
    * Download what the page is showing.
@@ -94,6 +132,8 @@ export const publicPortalKeys = {
     ['public-portal', 'indicators', periods, filters] as const,
   periods: ['public-portal', 'periods'] as const,
   complaints: ['public-portal', 'complaints'] as const,
+  complaintsByOperator: ['public-portal', 'complaints-by-operator'] as const,
+  operators: ['public-portal', 'operators'] as const,
   admin: ['public-indicators'] as const,
   available: ['public-indicators', 'available'] as const,
 };

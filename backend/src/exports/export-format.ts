@@ -6,7 +6,15 @@ import ExcelJS from 'exceljs';
  * the Authority, the subject, and when the file was taken.
  */
 
-export const AUTHORITY_NAME = 'National Communication Authority, South Sudan';
+/**
+ * The Authority's name, as its own seal spells it: NATIONAL COMMUNICATION AUTHORITY, and beneath
+ * that REPUBLIC OF SOUTH SUDAN.
+ *
+ * This is the name printed at the top of every workbook and PDF the portal produces, which is to
+ * say the name on the documents that leave the building. It read "South Sudan" while the emails
+ * read "Republic of South Sudan" and the printed sheets read "Communications" with an s.
+ */
+export const AUTHORITY_NAME = 'National Communication Authority, Republic of South Sudan';
 
 /** Excel number formats. Money carries thousands separators and two decimals (SSP, §5). */
 export const NUMBER_FORMAT = {
@@ -21,6 +29,13 @@ export interface SheetColumn {
   width?: number;
   /** One of NUMBER_FORMAT, for numeric columns. */
   numFmt?: string;
+}
+
+/** An SSP amount as every generated document writes it, or a plain word where there is none. */
+export function moneyLabel(value: number | null): string {
+  return value === null
+    ? 'Not calculated'
+    : `SSP ${value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** `levy-assessment-2026-08-21.xlsx` — the subject and the day it was taken. */

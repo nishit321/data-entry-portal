@@ -10,6 +10,8 @@ import {
   FileText,
   Info,
   MessageSquare,
+  TrendingDown,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Badge,
@@ -24,12 +26,19 @@ import {
   type SelectOption,
 } from '../components/ui';
 import { PublicIndicatorChart } from '../components/PublicIndicatorChart';
-import { publicPortalApi, publicPortalKeys } from '../lib/public-portal.api';
+import { BrandMark } from '../components/BrandMark';
+import { describePublishedChange, latestPublishedChange } from '../lib/published-change';
+import {
+  publicPortalApi,
+  publicPortalKeys,
+  type PublicComplaintsByOperator,
+} from '../lib/public-portal.api';
 import { getErrorMessage } from '../lib/api';
 import {
   COMPLAINT_CATEGORY_LABELS,
   ENTITY_TYPE_LABELS,
   PUBLIC_AGGREGATION_LABELS,
+  type PublicPoint,
   type PublicPortalFilters,
 } from '../lib/types';
 
@@ -93,6 +102,10 @@ export function OpenDataPage() {
     queryKey: publicPortalKeys.complaints,
     queryFn: () => publicPortalApi.complaintsSummary(),
   });
+  const byOperatorQuery = useQuery({
+    queryKey: publicPortalKeys.complaintsByOperator,
+    queryFn: () => publicPortalApi.complaintsByOperator(),
+  });
 
   const overview = overviewQuery.data;
   const report = indicatorsQuery.data;
@@ -137,10 +150,28 @@ export function OpenDataPage() {
             <ArrowLeft size={14} aria-hidden />
             {strings.action.backToSignIn}
           </Link>
-          <h1 className="mt-4 text-3xl font-semibold text-gray-900">
-            South Sudan communications sector
-          </h1>
-          <p className="mt-2 max-w-2xl text-gray-600">
+          {/*
+           * The seal, because this is the page the portal is most likely to be read on by people
+           * who have no account and no other reason to trust it: citizens, journalists, anybody
+           * quoting a sector figure. It should be obvious at a glance whose figures these are.
+           */}
+          {/*
+           * Stacked on a phone, side by side from `sm` up. Beside the seal at 320px, the heading's
+           * longest word ("communications" at 30px) had nowhere to go and pushed the page 17px
+           * wider than the screen, which the reflow check caught.
+           */}
+          <div className="mt-4 flex flex-col items-start gap-3 sm:flex-row sm:gap-4">
+            <BrandMark size={56} alt={`${strings.brand.authority} seal`} className="sm:mt-1" />
+            <div className="min-w-0">
+              <h1 className="break-words text-2xl font-semibold text-gray-900 sm:text-3xl">
+                South Sudan communications sector
+              </h1>
+              <p className="mt-1 text-sm font-medium text-gray-500">
+                {strings.brand.authorityFull}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 max-w-2xl text-gray-600">
             Figures reported by licensed operators to the National Communication Authority, combined
             across the sector. Published once the Authority has approved the returns and closed the
             reporting period.
@@ -274,6 +305,7 @@ export function OpenDataPage() {
                     {PUBLIC_AGGREGATION_LABELS[indicator.aggregation]}
                   </span>
                 </div>
+                <IndicatorChange points={indicator.points} />
                 {indicator.description && (
                   <p className="mt-1 text-sm text-gray-600">{indicator.description}</p>
                 )}
@@ -332,6 +364,10 @@ export function OpenDataPage() {
                 </div>
               )}
 
+              {byOperatorQuery.data?.published && (
+                <ComplaintsByOperator report={byOperatorQuery.data} />
+              )}
+
               <p className="mt-4 text-sm text-gray-500">
                 Have something to report?{' '}
                 <Link to="/complaints/file" className="text-brand-700 underline">
@@ -348,6 +384,101 @@ export function OpenDataPage() {
           figures are commercially confidential and are not published.
         </p>
       </main>
+    </div>
+  );
+}
+/**
+ * How the newest published figure compares with the last one before it.
+ *
+ * Only ever between two figures the Authority has already published. A period held back for
+ * disclosure is skipped, and the period actually compared against is named, because it may not be
+ * the quarter immediately before.
+ */
+function IndicatorChange({ points }: { points: PublicPoint[] }) {
+  const moved = latestPublishedChange(points);
+  if (!moved) return null;
+
+  const rising = moved.change > 0;
+  const tone = Math.round(moved.change * 100) === 0 ? 'text-gray-500' : 'text-gray-700';
+  const Icon = rising ? TrendingUp : TrendingDown;
+
+  return (
+    <p className={`mt-1 flex items-center gap-1.5 text-sm font-medium ${tone}`}>
+      {Math.round(moved.change * 100) !== 0 && <Icon size={15} aria-hidden />}
+      {describePublishedChange(moved)}
+    </p>
+  );
+}
+
+/**
+ * Complaint figures per named operator, shown only once the Authority has published them.
+ *
+ * What is shown is what can be fairly compared: how many, what share reached an end, and how
+ * quickly. Operators with too few complaints for a rate to mean anything are counted together, not
+ * named, and the page says so rather than leaving them out without a word.
+ */
+function ComplaintsByOperator({
+  report,
+}: {
+  report: Extract<PublicComplaintsByOperator, { published: true }>;
+}) {
+  const percent = (rate: number | null) => (rate === null ? '—' : `${Math.round(rate * 100)}%`);
+  return (
+    <div className="mt-6 border-t border-gray-100 pt-4">
+      <h3 className="text-base font-semibold text-gray-900">By operator</h3>
+      <p className="mt-1 text-sm text-gray-600">
+        The last {report.windowMonths} months. A larger operator serves more people and receives
+        more complaints, so compare how many reach an end and how quickly, not the totals.
+      </p>
+      {report.operators.length === 0 ? (
+        <p className="mt-3 text-sm text-gray-600">
+          No operator has received {report.threshold} or more complaints in this period.
+        </p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-start text-xs uppercase tracking-wide text-gray-500">
+                <th scope="col" className="py-2 pe-4 text-start font-medium">
+                  {strings.field.operator}
+                </th>
+                <th scope="col" className="py-2 pe-4 text-end font-medium">
+                  Received
+                </th>
+                <th scope="col" className="py-2 pe-4 text-end font-medium">
+                  Reached an end
+                </th>
+                <th scope="col" className="py-2 text-end font-medium">
+                  Typical days
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {report.operators.map((o) => (
+                <tr key={o.name}>
+                  <td className="py-2 pe-4 font-medium text-gray-900">{o.name}</td>
+                  <td className="py-2 pe-4 text-end">{o.received}</td>
+                  <td className="py-2 pe-4 text-end">{percent(o.resolutionRate)}</td>
+                  <td className="py-2 text-end">{o.medianDaysToResolve ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {report.belowThreshold.operators > 0 && (
+        <p className="mt-3 text-xs text-gray-500">
+          {report.belowThreshold.complaints} more complaints were about{' '}
+          {report.belowThreshold.operators} operator
+          {report.belowThreshold.operators === 1 ? '' : 's'} with fewer than {report.threshold}{' '}
+          each. Too few to compare fairly, so they are not named.
+        </p>
+      )}
+      {report.unattributed > 0 && (
+        <p className="mt-1 text-xs text-gray-500">
+          {report.unattributed} did not name an operator.
+        </p>
+      )}
     </div>
   );
 }

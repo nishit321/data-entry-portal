@@ -1,3 +1,21 @@
+/* eslint-disable no-console -- a command-line tool reports by printing */
+/**
+ * The demonstration.
+ *
+ *   npm run prisma:seed
+ *
+ * An invented operator and its users, a twelve-field sample questionnaire, two closed quarters of
+ * approved returns so the charts draw something, published open-data figures, four network sites
+ * and two fibre routes, a penalty schedule line, two compliance cases with an enforcement order on
+ * each, and a 250-agent register.
+ *
+ * None of it belongs on a live server. It exists so that every screen has something on it: an
+ * empty portal demonstrates nothing, and a browser test needs something to look at.
+ *
+ * **For a real deployment, run `npm run seed:production` instead.** That creates the administrator
+ * and the reference lists and stops. This file calls those same two functions first, so a
+ * developer still gets one command.
+ */
 import {
   EntityStatus,
   EntityType,
@@ -8,11 +26,14 @@ import {
   FlowOrStock,
   NetworkSiteKind,
   NetworkSiteStatus,
+  PaymentKind,
+  PaymentMethod,
   PeriodStatus,
   Prisma,
-  PrismaClient,
   PublicAggregation,
   ReferenceCategory,
+  ComplaintCategory,
+  ComplaintStatus,
   ReportingFrequency,
   Role,
   RuleSeverity,
@@ -21,35 +42,9 @@ import {
   TemplateStatus,
 } from '@prisma/client';
 import { hashPassword } from '../src/common/utils/password.util';
-
-const prisma = new PrismaClient();
-
-/** Create the initial ADMIN account if it does not exist. */
-async function seedAdmin() {
-  const email = (process.env.SEED_ADMIN_EMAIL || 'admin@nca.gov.ss').toLowerCase();
-  const password = process.env.SEED_ADMIN_PASSWORD || 'Admin@12345';
-
-  if (await prisma.user.findUnique({ where: { email } })) {
-    console.log(`Admin already exists: ${email}`);
-    return;
-  }
-
-  await prisma.user.create({
-    data: {
-      email,
-      passwordHash: await hashPassword(password),
-      firstName: 'System',
-      lastName: 'Administrator',
-      role: Role.ADMIN,
-      isActive: true,
-    },
-  });
-
-  console.log('Seeded admin account:');
-  console.log(`  email:    ${email}`);
-  console.log(`  password: ${password}`);
-  console.log('  (change this password after first login)');
-}
+import { generateRawToken, hashToken } from '../src/common/utils/token.util';
+import { formatReferenceNumber } from '../src/common/utils/reference-number.util';
+import { prisma, seedAdmin, seedReferenceData } from './seed-core';
 
 /**
  * The three Authority reviewers (Checker → Verifier → Approver) so the review workflow can be
@@ -141,92 +136,6 @@ async function seedDemoOperator() {
       location: 'Juba',
     },
   });
-}
-
-/**
- * Seed the managed lookup lists from the questionnaire's controlled fields.
- * Idempotent and non-destructive: existing rows (incl. admin edits) are left
- * untouched. "Other" is handled as a controlled free-text pair, not seeded here.
- */
-async function seedReferenceData() {
-  const lists: Record<ReferenceCategory, { code: string; label: string }[]> = {
-    SPECTRUM_BAND: [
-      { code: 'MHZ_700', label: '700 MHz' },
-      { code: 'MHZ_800', label: '800 MHz' },
-      { code: 'MHZ_900', label: '900 MHz' },
-      { code: 'MHZ_1800', label: '1800 MHz' },
-      { code: 'MHZ_2100', label: '2100 MHz' },
-      { code: 'MHZ_2600', label: '2600 MHz' },
-      { code: 'MHZ_3500', label: '3500 MHz' },
-    ],
-    TECHNOLOGY: [
-      { code: '2G', label: '2G' },
-      { code: '3G', label: '3G' },
-      { code: '4G', label: '4G' },
-      { code: '5G', label: '5G' },
-      { code: 'FIBER', label: 'Fibre' },
-      { code: 'WIRELESS_BROADBAND', label: 'Wireless Broadband' },
-      { code: 'MICROWAVE', label: 'Microwave' },
-      { code: 'VSAT', label: 'VSAT' },
-    ],
-    SERVICE_TYPE: [
-      { code: 'MOBILE_VOICE', label: 'Mobile Voice' },
-      { code: 'MOBILE_DATA', label: 'Mobile Data' },
-      { code: 'MOBILE_MONEY', label: 'Mobile Money Services' },
-      { code: 'FIXED_INTERNET', label: 'Fixed Internet' },
-      { code: 'VAS', label: 'Value-Added Services (VAS)' },
-    ],
-    GEO_CLASSIFICATION: [
-      { code: 'URBAN', label: 'Urban' },
-      { code: 'PERI_URBAN', label: 'Peri-urban' },
-      { code: 'RURAL', label: 'Rural' },
-    ],
-    ENERGY_GENERATION_TYPE: [
-      { code: 'DIESEL', label: 'Diesel' },
-      { code: 'WIND', label: 'Wind' },
-      { code: 'SOLAR', label: 'Solar' },
-      { code: 'HYBRID', label: 'Hybrid' },
-    ],
-    ENERGY_STORAGE_TYPE: [
-      { code: 'LITHIUM_ION', label: 'Lithium-ion storage' },
-      { code: 'OTHER_CHEMICAL', label: 'Other chemical storage' },
-      { code: 'CAPACITIVE', label: 'Capacitive storage' },
-    ],
-    FIXED_ACCESS_TYPE: [
-      { code: 'DSL', label: 'DSL' },
-      { code: 'FIBER', label: 'Fibre' },
-      { code: 'SATELLITE_LEO', label: 'Satellite (LEO)' },
-      { code: 'SATELLITE_GEO', label: 'Satellite (geostationary)' },
-      { code: 'WIRELESS_BROADBAND', label: 'Wireless Broadband' },
-    ],
-    TRANSACTION_TYPE: [
-      { code: 'CASH_IN', label: 'Cash-in' },
-      { code: 'CASH_OUT', label: 'Cash-out' },
-      { code: 'P2P', label: 'Peer-to-peer (P2P) transfers' },
-      { code: 'MERCHANT_PAYMENT', label: 'Merchant payments' },
-      { code: 'BILL_PAYMENT', label: 'Bill payments' },
-      { code: 'BULK_DISBURSEMENT', label: 'Bulk disbursements' },
-      { code: 'CROSS_NETWORK', label: 'Cross-network (interoperable)' },
-    ],
-  };
-
-  let count = 0;
-  for (const [category, items] of Object.entries(lists) as [
-    ReferenceCategory,
-    { code: string; label: string }[],
-  ][]) {
-    for (let i = 0; i < items.length; i++) {
-      await prisma.referenceItem.upsert({
-        where: { category_code: { category, code: items[i].code } },
-        update: {},
-        create: { category, code: items[i].code, label: items[i].label, sortOrder: i },
-      });
-      count++;
-    }
-  }
-  console.log(
-    `Seeded reference data (${count} items across ${Object.keys(lists).length} categories).`,
-  );
 }
 
 /**
@@ -1062,7 +971,27 @@ async function seedAgentRegister() {
   console.log(`Seeded ${AGENTS} agents across ${towns.length} towns.`);
 }
 
+/**
+ * Refuse to invent an operator on a live server.
+ *
+ * The demonstration data is indistinguishable from real data once it is in: "Demo Telecom" appears
+ * in the operator list, its returns count towards sector figures, and its 250 agents are on the
+ * map. Removing it afterwards is a manual job on a running system, which is exactly the situation
+ * this refusal exists to prevent.
+ */
+function assertNotProduction(): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'This is the demonstration seed and NODE_ENV is production. It would create an invented ' +
+        'operator, its returns and 250 agents on a live server.\n' +
+        'Run `npm run seed:production` instead: the administrator and the reference lists, and ' +
+        'nothing else.',
+    );
+  }
+}
+
 async function main() {
+  assertNotProduction();
   await seedAdmin();
   await seedReviewers();
   await seedDemoOperator();
@@ -1073,12 +1002,314 @@ async function main() {
   await seedNetwork();
   await seedEnforcement();
   await seedAgentRegister();
+  await seedPayments();
+  await seedComplaints();
+}
+
+/**
+ * Complaints from the public, so the case book, the figures by operator and the public summary
+ * all have something on them.
+ *
+ * Written to read like the real thing in South Sudan: a mobile money transfer that never arrived,
+ * a bundle charged twice, a town that lost signal. Spread over the last six months and across
+ * statuses, so the trend has a shape and some cases are still open. The demo operator has twelve,
+ * enough to clear the publication threshold of ten if the Authority turns publication on; the
+ * others have a handful each, and three name nobody, as real ones often do.
+ *
+ * Skipped on a database that already has complaints: those are somebody's real cases, or an
+ * earlier run's demo ones, and neither should be added to.
+ */
+async function seedComplaints() {
+  if ((await prisma.complaint.count()) > 0) {
+    console.log('Complaints already exist, leaving them as they are.');
+    return;
+  }
+  const byLicence = async (licence: string) =>
+    (
+      await prisma.entity.findFirst({
+        where: { licenceNumber: licence, deletedAt: null },
+        select: { id: true },
+      })
+    )?.id ?? null;
+  const demo = await byLicence('NCA/MNO/2026/001');
+  const equatoria = await byLicence('NCA/MNO/2026/003');
+  const nile = await byLicence('NCA/ISP/2026/002');
+  if (!demo) {
+    console.log('Demo operator not seeded yet, skipping complaints.');
+    return;
+  }
+
+  const C = ComplaintCategory;
+  const S = ComplaintStatus;
+  // [about, category, status, days ago filed, days to an end (if it ended), subject]
+  const cases: [
+    string | null,
+    ComplaintCategory,
+    ComplaintStatus,
+    number,
+    number | null,
+    string,
+  ][] = [
+    [demo, C.BILLING, S.RESOLVED, 170, 6, 'Charged twice for the same data bundle'],
+    [demo, C.SERVICE_QUALITY, S.RESOLVED, 150, 3, 'Calls drop every few minutes in Juba town'],
+    [demo, C.AGENT_CONDUCT, S.CLOSED, 140, 9, 'Agent asked for an extra fee to withdraw cash'],
+    [demo, C.BILLING, S.RESOLVED, 120, 4, 'Airtime deducted with no call made'],
+    [demo, C.COVERAGE, S.RESOLVED, 100, 12, 'No signal in Kapoeta since the tower went down'],
+    [demo, C.SERVICE_QUALITY, S.RESOLVED, 80, 2, 'Mobile money transfer not received'],
+    [demo, C.BILLING, S.IN_REVIEW, 60, null, 'Bundle expired a week early'],
+    [demo, C.DATA_PRIVACY, S.RESOLVED, 45, 5, 'Received messages meant for another customer'],
+    [demo, C.SERVICE_QUALITY, S.IN_REVIEW, 30, null, 'Internet very slow every evening'],
+    [demo, C.AGENT_CONDUCT, S.RECEIVED, 18, null, 'Agent refused to register my SIM card'],
+    [demo, C.BILLING, S.RECEIVED, 9, null, 'Charged for a service I never asked for'],
+    [demo, C.COVERAGE, S.RECEIVED, 3, null, 'Lost signal along the Juba to Nimule road'],
+    [equatoria, C.COVERAGE, S.RESOLVED, 110, 8, 'No coverage in Yei market'],
+    [equatoria, C.BILLING, S.RESOLVED, 70, 3, 'Tariff changed without notice'],
+    [equatoria, C.SERVICE_QUALITY, S.RECEIVED, 12, null, 'SMS not delivered for two days'],
+    [nile, C.SERVICE_QUALITY, S.CLOSED, 90, 15, 'Home internet down for a week'],
+    [nile, C.BILLING, S.IN_REVIEW, 25, null, 'Billed for a month after cancelling'],
+    [null, C.SERVICE_QUALITY, S.RESOLVED, 130, 7, 'Mobile money sent to the wrong number'],
+    [null, C.SUGGESTION, S.CLOSED, 55, 10, 'Please publish coverage maps for rural counties'],
+    [null, C.OTHER, S.RECEIVED, 6, null, 'Not sure which network is to blame for dropped calls'],
+  ];
+
+  const now = Date.now();
+  const year = new Date().getFullYear();
+  let seq = 0;
+  for (const [about, category, status, ago, toEnd, subject] of cases) {
+    seq += 1;
+    const createdAt = new Date(now - ago * 86_400_000);
+    await prisma.complaint.create({
+      data: {
+        referenceNumber: formatReferenceNumber('CMP', year, seq),
+        // A real code, hashed and thrown away: nobody can track a demo complaint, which is right.
+        trackingCodeHash: hashToken(generateRawToken()),
+        category,
+        status,
+        subject,
+        description: `${subject}. Filed through the public complaint form.`,
+        aboutEntityId: about,
+        createdAt,
+        resolvedAt: toEnd === null ? null : new Date(createdAt.getTime() + toEnd * 86_400_000),
+      },
+    });
+  }
+  console.log(`Seeded ${cases.length} demo complaints.`);
+}
+
+/**
+ * The levy for one approved return, worked out the way the levy screen works it out: the answers
+ * to the levy-basis questions, at the rate whose window covers the period's due date.
+ *
+ * Mirrored rather than approximated. The demo pays some levies in full, and a payment that was
+ * "in full" by a slightly different sum would show on the Payments screen as part paid or overpaid,
+ * which is exactly the kind of small wrongness a client notices in a demonstration.
+ */
+async function levyDueFor(entityId: string, periodId: string): Promise<number | null> {
+  const period = await prisma.reportingPeriod.findUnique({
+    where: { id: periodId },
+    select: { dueDate: true },
+  });
+  if (!period) return null;
+  const rate = await prisma.levyRate.findFirst({
+    where: {
+      deletedAt: null,
+      effectiveFrom: { lte: period.dueDate },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: period.dueDate } }],
+    },
+    orderBy: { effectiveFrom: 'desc' },
+    select: { ratePercent: true },
+  });
+  if (!rate) return null;
+  const submission = await prisma.submission.findFirst({
+    where: {
+      entityId,
+      periodId,
+      status: SubmissionStatus.APPROVED,
+      deletedAt: null,
+      supersededBy: null,
+    },
+    select: { values: { where: { field: { isLevyBasis: true } }, select: { valueText: true } } },
+  });
+  if (!submission) return null;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const revenue = round2(submission.values.reduce((sum, v) => sum + (Number(v.valueText) || 0), 0));
+  return round2((revenue * Number(rate.ratePercent)) / 100);
+}
+
+/**
+ * A few months of payments, so the Payments screen has a story to tell.
+ *
+ * The demo operator has paid one quarter's levy in full and part of the next, and nothing of its
+ * payable penalty; one payment was keyed twice and the second keying was reversed by a different
+ * officer. Another operator is paid up, so the table by operator has a contrast in it.
+ *
+ * Seeds a levy rate first if there is none, because without one no levy is assessed and there is
+ * nothing to pay. Payments can never be deleted, so this skips itself on a database that already
+ * has demo payments rather than piling up a second set.
+ */
+async function seedPayments() {
+  const demo = await prisma.entity.findFirst({
+    where: { licenceNumber: 'NCA/MNO/2026/001', deletedAt: null },
+    select: { id: true },
+  });
+  if (!demo) {
+    console.log('Demo operator not seeded yet, skipping payments.');
+    return;
+  }
+  if ((await prisma.payment.count({ where: { entityId: demo.id } })) > 0) {
+    console.log('Demo payments already exist, leaving them as they are.');
+    return;
+  }
+
+  if ((await prisma.levyRate.count({ where: { deletedAt: null } })) === 0) {
+    await prisma.levyRate.create({
+      data: {
+        ratePercent: 1.5,
+        effectiveFrom: new Date('2025-01-01'),
+        label: 'Demonstration rate, 1.5% of revenue',
+      },
+    });
+    console.log('Seeded a demonstration levy rate of 1.5%.');
+  }
+
+  const admin = await prisma.user.findFirst({ where: { role: Role.ADMIN, deletedAt: null } });
+  const supervisor = await prisma.user.findFirst({
+    where: { role: Role.SUPERVISOR, deletedAt: null },
+  });
+  if (!admin || !supervisor) {
+    console.log('No administrator and supervisor pair, so the demo payments were skipped.');
+    return;
+  }
+
+  // The demo operator's approved quarters, oldest first.
+  const quarters = await prisma.submission.findMany({
+    where: {
+      entityId: demo.id,
+      status: SubmissionStatus.APPROVED,
+      deletedAt: null,
+      supersededBy: null,
+    },
+    select: { periodId: true, period: { select: { dueDate: true } } },
+    orderBy: { period: { dueDate: 'asc' } },
+  });
+
+  const year = new Date().getFullYear();
+  let seq = await prisma.payment.count({
+    where: { receiptNumber: { startsWith: `NCA/RCT/${year}/` } },
+  });
+  const receipt = () => {
+    seq += 1;
+    return `NCA/RCT/${year}/${String(seq).padStart(6, '0')}`;
+  };
+  const daysAfter = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
+  const asDate = (d: Date) => new Date(`${d.toISOString().slice(0, 10)}T00:00:00.000Z`);
+
+  let made = 0;
+  const [first, second] = quarters;
+
+  if (first) {
+    const due = await levyDueFor(demo.id, first.periodId);
+    if (due) {
+      // Paid in full, a fortnight after the deadline.
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: demo.id,
+          kind: PaymentKind.LEVY,
+          periodId: first.periodId,
+          amount: due,
+          paidOn: asDate(daysAfter(first.period.dueDate, 14)),
+          method: PaymentMethod.BANK_TRANSFER,
+          bankReference: 'FT25DEMO0001',
+          recordedById: admin.id,
+        },
+      });
+      made += 1;
+    }
+  }
+
+  if (second) {
+    const due = await levyDueFor(demo.id, second.periodId);
+    if (due) {
+      const paidOn = asDate(daysAfter(second.period.dueDate, 20));
+      const part = Math.round(due * 0.6 * 100) / 100;
+      // Sixty per cent, with a note that the rest was promised.
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: demo.id,
+          kind: PaymentKind.LEVY,
+          periodId: second.periodId,
+          amount: part,
+          paidOn,
+          method: PaymentMethod.BANK_TRANSFER,
+          bankReference: 'FT26DEMO0002',
+          note: 'The operator wrote to say the balance follows at the end of the month.',
+          recordedById: supervisor.id,
+        },
+      });
+      // The same line of the statement keyed a second time, and reversed by somebody else.
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: demo.id,
+          kind: PaymentKind.LEVY,
+          periodId: second.periodId,
+          amount: part,
+          paidOn,
+          method: PaymentMethod.BANK_TRANSFER,
+          bankReference: 'FT26DEMO0002-X',
+          recordedById: admin.id,
+          reversedAt: daysAfter(paidOn, 1),
+          reversedById: supervisor.id,
+          reversalReason: 'Keyed twice from the same line of the bank statement.',
+        },
+      });
+      made += 2;
+    }
+  }
+
+  // Another operator, paid up, so the table by operator has something to compare with.
+  const other = await prisma.submission.findFirst({
+    where: {
+      entityId: { not: demo.id },
+      status: SubmissionStatus.APPROVED,
+      deletedAt: null,
+      supersededBy: null,
+      entity: { deletedAt: null, type: EntityType.MNO },
+    },
+    select: { entityId: true, periodId: true, period: { select: { dueDate: true } } },
+    orderBy: { period: { dueDate: 'asc' } },
+  });
+  if (other) {
+    const due = await levyDueFor(other.entityId, other.periodId);
+    if (due) {
+      await prisma.payment.create({
+        data: {
+          receiptNumber: receipt(),
+          entityId: other.entityId,
+          kind: PaymentKind.LEVY,
+          periodId: other.periodId,
+          amount: due,
+          paidOn: asDate(daysAfter(other.period.dueDate, -3)),
+          method: PaymentMethod.MOBILE_MONEY,
+          bankReference: 'MM25DEMO0101',
+          recordedById: supervisor.id,
+        },
+      });
+      made += 1;
+    }
+  }
+
+  console.log(`Seeded ${made} demo payments.`);
 }
 
 main()
   .catch((e) => {
-    console.error(e);
-    process.exit(1);
+    // The message, not the stack. Every failure this can produce is something a person has to
+    // read and act on, and a refusal buried under twelve lines of Node internals reads as a crash.
+    console.error(e instanceof Error ? e.message : e);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

@@ -22,7 +22,6 @@ export const envValidationSchema = Joi.object({
     .required(),
 
   JWT_SECRET: Joi.string().min(16).required(),
-  JWT_EXPIRES_IN: Joi.string().default('1d'),
 
   FRONTEND_RESET_URL: Joi.string().uri().default('http://localhost:5173/reset-password'),
   RESET_TOKEN_TTL_MIN: Joi.number().integer().positive().default(30),

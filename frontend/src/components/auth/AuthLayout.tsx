@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { BrandMark } from '../BrandMark';
+import { strings } from '../../lib/strings';
 import { ShieldCheck, LineChart, FileCheck2, Lock } from 'lucide-react';
 
 const HIGHLIGHTS = [
@@ -44,14 +46,10 @@ export function AuthLayout({
         <div className="pointer-events-none absolute -bottom-24 -start-16 h-72 w-72 rounded-full bg-brand-500/20 blur-3xl" />
 
         <div className="relative flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20">
-            <ShieldCheck size={24} />
-          </div>
+          <BrandMark size={44} />
           <div className="leading-tight">
-            <div className="text-base font-semibold">NCA Data Collection Portal</div>
-            <div className="text-xs text-brand-200">
-              National Communication Authority, South Sudan
-            </div>
+            <div className="text-base font-semibold">{strings.brand.portal}</div>
+            <div className="text-xs text-brand-200">{strings.brand.authorityFull}</div>
           </div>
         </div>
 
@@ -92,12 +90,10 @@ export function AuthLayout({
         <div className="w-full max-w-sm">
           {/* Compact brand for mobile */}
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white">
-              <ShieldCheck size={22} />
-            </div>
+            <BrandMark size={40} />
             <div className="leading-tight">
-              <div className="text-sm font-semibold text-gray-900">NCA Portal</div>
-              <div className="text-xs text-gray-500">Data Collection</div>
+              <div className="text-sm font-semibold text-gray-900">{strings.brand.portalShort}</div>
+              <div className="text-xs text-gray-500">{strings.brand.portalTagline}</div>
             </div>
           </div>
 

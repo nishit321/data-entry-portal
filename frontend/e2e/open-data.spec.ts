@@ -82,6 +82,45 @@ test.describe('the public open-data page', () => {
     await expect(page.getByText(/point at a named company/)).toBeVisible();
   });
 
+  test('says which way a published figure has moved, and against which period', async ({
+    page,
+  }) => {
+    /*
+     * "Percentage changes and previous-period comparisons" (NCA, 16 September 2026).
+     *
+     * The baseline is named rather than implied. The period immediately before may have been
+     * withheld, in which case the comparison reaches further back, and a reader who assumed it was
+     * last quarter would misread the sentence.
+     */
+    await page.goto('/open-data');
+    await page.getByLabel('Find a figure').fill('mobile subscribers');
+    await expect(page.getByText('Mobile subscribers')).toBeVisible();
+
+    /*
+     * The line straight after this figure's heading. The search shows more than one card, each
+     * with its own change line, so a page-wide match is ambiguous and Playwright rightly refuses
+     * to pick one. This first version did exactly that and failed on its first full run.
+     */
+    const heading = page.getByRole('heading', { name: 'Mobile subscribers' });
+    await expect(heading.locator('xpath=following::p[1]')).toHaveText(
+      /^(Up|Down) \d+% on .+|^Unchanged from .+/,
+    );
+  });
+
+  test('says nothing about the movement of a figure it will not publish', async ({ page }) => {
+    /*
+     * The disclosure rule, enforced on the sentence as well as the chart. Capital investment is
+     * reported by one operator, so every period is withheld. A percentage change published beside
+     * a withheld series would put the figures back within arithmetic reach of anybody who wanted
+     * them, which is the whole thing the threshold exists to prevent.
+     */
+    await page.goto('/open-data');
+    await page.getByLabel('Find a figure').fill('capital');
+    await expect(page.getByText('Capital investment')).toBeVisible();
+
+    await expect(page.getByText(/^(Up|Down) \d+% on |^Unchanged from /)).toHaveCount(0);
+  });
+
   test('downloads the figures as a spreadsheet and as a document', async ({ page }) => {
     await page.goto('/open-data');
     await expect(page.getByText('Mobile subscribers')).toBeVisible();

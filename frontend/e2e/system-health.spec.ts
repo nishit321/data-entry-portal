@@ -19,6 +19,9 @@ test('names every overnight check, and says what it will do', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'Overnight checks' })).toBeVisible();
 
   const buttons = page.getByRole('button', { name: 'Run now' });
+  // The heading renders before the list of jobs arrives, and `count()` does not wait: asked at
+  // once, it answers 0 while the page is still loading.
+  await expect(buttons.first()).toBeVisible();
   const count = await buttons.count();
   // Seven jobs today. Asserted as "more than the three that had copy", so adding an eighth does
   // not fail this while still catching a list that has quietly shrunk.

@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './layout/Sidebar';
+import { SessionTimeout } from './SessionTimeout';
 import { Topbar } from './layout/Topbar';
 import { ConnectionBanner } from './layout/ConnectionBanner';
 import { RouteErrorBoundary } from './RouteErrorBoundary';
@@ -43,6 +44,9 @@ export function Layout() {
       >
         Skip to content
       </a>
+
+      {/* The idle clock, mounted once for the whole signed-in shell rather than per screen. */}
+      <SessionTimeout />
 
       <Sidebar
         open={mobileNavOpen}

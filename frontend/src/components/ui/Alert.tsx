@@ -21,15 +21,23 @@ export function Alert({
   tone = 'danger',
   children,
   onRetry,
+  id,
 }: {
   tone?: AlertTone;
   children: ReactNode;
   onRetry?: () => void;
+  /**
+   * Lets a control point at this alert with `aria-describedby`. Used when the alert is the reason
+   * a nearby control is unavailable (FRONTEND_STANDARDS §3.14): the reason is then attached to the
+   * control rather than merely sitting near it, so a screen reader reaches it too.
+   */
+  id?: string;
 }) {
   if (!children) return null;
   const { wrap, icon: Icon } = styles[tone];
   return (
     <div
+      id={id}
       role={tone === 'danger' ? 'alert' : 'status'}
       className={`flex items-start gap-2.5 rounded-md border px-3 py-2.5 text-sm ${wrap}`}
     >

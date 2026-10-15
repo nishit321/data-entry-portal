@@ -408,6 +408,16 @@ describe('data segregation, swept across every list an operator can fetch (e2e)'
       kind: 'scoped',
       noControl: 'nothing here is overdue, so neither operator has a case. B must still be absent.',
     },
+    'GET /api/v1/payments': {
+      kind: 'scoped',
+      noControl:
+        'a payment can never be deleted, so this fixture, which cleans up by deletion, records ' +
+        'none. The positive control is in payments.e2e-spec.ts. B must still be absent.',
+    },
+    'GET /api/v1/payments/balances': {
+      kind: 'scoped',
+      noControl: 'the same: no payment, and no levy configured, so neither operator has a charge.',
+    },
     'GET /api/v1/levy/assessments': {
       kind: 'scoped',
       noControl:

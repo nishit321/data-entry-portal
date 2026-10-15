@@ -47,7 +47,10 @@ test.describe('the audit trail, on paper', () => {
      */
     const header = page.locator('.print-header');
     await expect(header).toBeVisible();
-    await expect(header).toContainText('National Communications Authority');
+    // Spelled the way the Authority's seal spells it. This assertion used to expect
+    // "Communications", matching a typo in the component, so the test was holding the mistake in
+    // place rather than catching it.
+    await expect(header).toContainText('National Communication Authority');
     // Whatever the screen is called in the navigation — the header takes its title from the
     // same place the browser tab does, so the two cannot drift apart.
     await expect(header).toContainText('Audit log');

@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { CopyPlus, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, CopyPlus, FileText, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   Alert,
   Badge,
@@ -127,6 +127,26 @@ export function TemplatesPage() {
     onError: (err) => toast.error(getErrorMessage(err, "We couldn't create a new version")),
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (rowId: string) => templatesApi.archive(rowId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: templateKeys.all });
+      toast.success('Archived. Nothing already filed against it has changed.');
+    },
+    // The server refuses while operators are still filing, and names the periods. That message is
+    // more use than anything this screen could write.
+    onError: (err) => toast.error(getErrorMessage(err, "We couldn't archive that template")),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (rowId: string) => templatesApi.restore(rowId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: templateKeys.all });
+      toast.success('Back as a draft. Publish it when it is ready.');
+    },
+    onError: (err) => toast.error(getErrorMessage(err, "We couldn't restore that template")),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (rowId: string) => templatesApi.remove(rowId),
     onSuccess: () => {
@@ -190,6 +210,23 @@ export function TemplatesPage() {
             label="Start a new version"
             onClick={() => newVersionMutation.mutate(t.id)}
           />
+          {/*
+           * Archive and restore are the same slot, because they are the same decision read from
+           * either side. Showing both at once would leave one of them doing nothing.
+           */}
+          {t.status === 'ARCHIVED' ? (
+            <IconButton
+              icon={ArchiveRestore}
+              label="Bring this template back as a draft"
+              onClick={() => restoreMutation.mutate(t.id)}
+            />
+          ) : (
+            <IconButton
+              icon={Archive}
+              label="Archive this template"
+              onClick={() => archiveMutation.mutate(t.id)}
+            />
+          )}
           <IconButton
             icon={Trash2}
             label="Delete this template"

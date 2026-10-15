@@ -1,6 +1,10 @@
 node_modules
 dist
 dist-ssr
+# A second build of the same app, used when two people need the browser suite at once: one
+# stack serves dist/ on the default ports and the other serves this on its own. Build output
+# like dist/ itself. See playwright.config.ts (UI_TEST_WEB_PORT).
+dist-alt
 *.local
 
 # Playwright: signed-in sessions, traces, screenshots and reports from a run.

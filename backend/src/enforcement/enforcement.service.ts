@@ -3,7 +3,6 @@ import {
   AuditAction,
   EnforcementReason,
   EnforcementStatus,
-  EntityStatus,
   EntityType,
   Prisma,
   ReportingFrequency,
@@ -17,6 +16,7 @@ import { RequestContext } from '../common/utils/request-context.util';
 import { paginate, toSkipTake } from '../common/utils/pagination.util';
 import { entityScopeFilter } from '../common/utils/data-scope.util';
 import { graceEndsAt, periodPhase } from '../common/utils/period-timeline.util';
+import { obligedEntityFilter, typesObligedBy } from '../common/utils/filing-obligation.util';
 import { assessPenalty } from './penalty-assessment';
 import { PenaltyScheduleService } from './penalty-schedule.service';
 import { EnforcementQueryDto } from './dto/enforcement-query.dto';
@@ -239,16 +239,13 @@ export class EnforcementService {
     const phase = periodPhase(period.status, period.dueDate, period.graceDays);
     if (phase !== 'overdue' && phase !== 'closed') return { skipped: true, opened: 0 };
 
-    // Which entity types the period's template applies to (union of its sections).
-    const types = new Set<EntityType>();
-    for (const section of period.template.sections) {
-      for (const t of section.applicableEntityTypes) types.add(t);
-    }
-    if (types.size === 0) return { skipped: false, opened: 0, expected: 0 };
+    // Who owes a return. Shared with analytics, which uses the same list as the denominator of
+    // the compliance rate, so the chart and the cases can never tell different stories.
+    const types = typesObligedBy(period.template.sections);
+    if (types.length === 0) return { skipped: false, opened: 0, expected: 0 };
 
-    // Entities expected to file: ACTIVE, of an applicable type.
     const expected = await this.prisma.entity.findMany({
-      where: { status: EntityStatus.ACTIVE, deletedAt: null, type: { in: [...types] } },
+      where: obligedEntityFilter(types),
       select: { id: true, name: true, type: true },
     });
 

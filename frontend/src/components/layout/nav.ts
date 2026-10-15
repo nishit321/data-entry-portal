@@ -23,6 +23,8 @@ import {
   KeyRound,
   Antenna,
   ShieldCheck,
+  Settings2,
+  Banknote,
 } from 'lucide-react';
 import type { Role } from '../../lib/types';
 
@@ -111,6 +113,13 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Coins,
     section: 'reporting',
     roles: [...OPERATOR_AND_AUTHORITY, 'CHECKER', 'VERIFIER', 'APPROVER'],
+  },
+  {
+    label: 'Payments',
+    to: '/payments',
+    icon: Banknote,
+    section: 'reporting',
+    roles: OPERATOR_AND_AUTHORITY,
   },
 
   {
@@ -212,6 +221,13 @@ export const NAV_ITEMS: NavItem[] = [
   },
 
   { label: 'Users', to: '/users', icon: Users, section: 'administration', roles: ['ADMIN'] },
+  {
+    label: 'Settings',
+    to: '/settings',
+    icon: Settings2,
+    section: 'administration',
+    roles: ['ADMIN'],
+  },
   {
     label: 'System health',
     to: '/system',
