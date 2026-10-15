@@ -23,6 +23,7 @@ import {
   useToast,
 } from '../components/ui';
 import { ComplianceTrendChart } from '../components/ComplianceTrendChart';
+import { PeriodComparison } from '../components/PeriodComparison';
 import { AnomalyPanel } from '../components/AnomalyPanel';
 import { analyticsApi, analyticsKeys, type AnalyticsFilters } from '../lib/analytics.api';
 import { exportsApi } from '../lib/exports.api';
@@ -163,9 +164,10 @@ export function AnalyticsPage() {
         <Card>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="text-base font-semibold text-gray-900">Filing timeliness</h3>
+              <h3 className="text-base font-semibold text-gray-900">Filing over time</h3>
               <p className="mt-1 text-sm text-gray-500">
-                Returns filed each reporting period, split into on time and late.
+                Each period shows everyone who owed a return, split into on time, late, and never
+                filed.
               </p>
             </div>
             {s && (
@@ -181,7 +183,12 @@ export function AnalyticsPage() {
             ) : trendPoints.length === 0 ? (
               <EmptyState message="No reporting periods to chart yet." />
             ) : (
-              <ComplianceTrendChart points={trendPoints} />
+              <>
+                <PeriodComparison points={trendPoints} />
+                <div className="mt-6">
+                  <ComplianceTrendChart points={trendPoints} />
+                </div>
+              </>
             )}
           </div>
         </Card>

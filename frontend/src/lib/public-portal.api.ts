@@ -6,6 +6,7 @@ import type {
   PublicComplaintsSummary,
   PublicIndicator,
   PublicIndicatorReport,
+  PublicOperator,
   PublicPeriod,
   PublicPortalFilters,
 } from './types';
@@ -37,6 +38,16 @@ export interface PublishableField {
 /** The open-data endpoints. No token is sent; these are readable by anyone. */
 export const publicPortalApi = {
   overview: () => api.get<PublicOverview>('/public/overview').then((r) => r.data),
+
+  /**
+   * The licensed operators, by name, for the complaint form's "who is this about?" field.
+   *
+   * Public because the complaint desk is reached without an account. Id, name and type only: who
+   * holds a licence is public record, what they earn is not, and the endpoint carries nothing that
+   * could be joined to a figure.
+   */
+  operators: () =>
+    api.get<{ operators: PublicOperator[] }>('/public/operators').then((r) => r.data.operators),
 
   indicators: (periods?: number, filters: PublicPortalFilters = {}) =>
     api
@@ -94,6 +105,7 @@ export const publicPortalKeys = {
     ['public-portal', 'indicators', periods, filters] as const,
   periods: ['public-portal', 'periods'] as const,
   complaints: ['public-portal', 'complaints'] as const,
+  operators: ['public-portal', 'operators'] as const,
   admin: ['public-indicators'] as const,
   available: ['public-indicators', 'available'] as const,
 };

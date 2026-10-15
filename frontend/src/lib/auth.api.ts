@@ -35,6 +35,9 @@ export const authApi = {
   signup: (payload: { email: string; password: string; firstName: string; lastName: string }) =>
     api.post<AuthResponse>('/auth/signup', payload).then((r) => r.data),
 
+  /** A fresh token for a session that is still in use. Needs a token that is valid right now. */
+  refresh: () => api.post<AuthResponse>('/auth/refresh').then((r) => r.data),
+
   forgotPassword: (email: string) =>
     api.post<{ message: string }>('/auth/forgot-password', { email }).then((r) => r.data),
 

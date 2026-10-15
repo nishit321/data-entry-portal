@@ -56,7 +56,22 @@ function terms(rule: PenaltyRule): string {
  * who can see a compliance case can read the schedule those cases are priced under; only an
  * administrator can change it.
  */
-export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
+export function PenaltySchedulePanel({
+  canManage,
+  canEditSchedule,
+}: {
+  /** Re-price the open cases against the schedule as it stands. ADMIN and SUPERVISOR. */
+  canManage: boolean;
+  /**
+   * Add or remove a line of the schedule itself. ADMIN only.
+   *
+   * Two permissions, not one, because the server holds them apart: the schedule is NCA Legal and
+   * Licensing's to set, entered by an administrator, while a supervisor working the cases may ask
+   * for them to be brought up to date. One flag for both showed a supervisor "Add a line" and
+   * "Remove", and then answered every click with a refusal.
+   */
+  canEditSchedule: boolean;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
 
@@ -133,9 +148,11 @@ export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
             >
               Update open cases
             </Button>
-            <Button icon={Plus} onClick={() => setOpen(true)}>
-              Add a line
-            </Button>
+            {canEditSchedule && (
+              <Button icon={Plus} onClick={() => setOpen(true)}>
+                Add a line
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -166,7 +183,7 @@ export function PenaltySchedulePanel({ canManage }: { canManage: boolean }) {
                   )}
                 </p>
               </div>
-              {canManage && (
+              {canEditSchedule && (
                 <IconButton
                   icon={Trash2}
                   label={`Remove the ${rule.label ?? 'penalty schedule'} line`}

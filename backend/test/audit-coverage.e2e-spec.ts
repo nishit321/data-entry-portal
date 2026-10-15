@@ -183,6 +183,10 @@ const MUST_AUDIT: Record<string, string> = {
   'POST /api/v1/templates': 'a questionnaire is created.',
   'PATCH /api/v1/templates/:id': 'and edited.',
   'POST /api/v1/templates/:id/publish': 'a questionnaire becomes the one operators must answer.',
+  'POST /api/v1/templates/:id/archive':
+    'a questionnaire taken out of use. It is how one leaves without being destroyed, so who did it ' +
+    'has to be on record.',
+  'POST /api/v1/templates/:id/restore': 'and one brought back, as a draft.',
   'POST /api/v1/templates/:id/new-version': 'a new version supersedes it.',
   'DELETE /api/v1/templates/:id': 'a questionnaire is withdrawn.',
   'POST /api/v1/templates/:id/sections': 'a section is added.',
@@ -262,6 +266,11 @@ const MUST_AUDIT: Record<string, string> = {
   'PATCH /api/v1/feeds/agreements/:id': 'and any change to it.',
   'DELETE /api/v1/feeds/agreements/:id': 'and its removal.',
 
+  // --- Operational switches ---
+  'PATCH /api/v1/settings/:key':
+    'who turned signing up on, and when. The answer has to be in the trail rather than in ' +
+    "anybody's memory.",
+
   // --- Identity events ---
   'POST /api/v1/auth/signup': 'an account created from outside.',
   'POST /api/v1/auth/login': 'every attempt, successful or not.',
@@ -309,6 +318,10 @@ const NOT_AUDITED: Record<string, string> = {
     'triggering a background job by hand. Whatever the job then does is audited by the job.',
   'POST /api/v1/documents/sweep-expiries':
     'the same: a sweep that notifies. The notifications it sends are the record.',
+  'POST /api/v1/auth/refresh':
+    'a new token for a session that is already signed in, and was recorded when it signed in. ' +
+    'Nothing stored changes, and the browser does this every ten minutes or so for everybody who ' +
+    'is working: recording each one would bury the sign-ins that matter.',
 };
 
 describe('audit coverage (e2e)', () => {
@@ -367,6 +380,15 @@ describe('audit coverage (e2e)', () => {
   }
 
   async function cleanup() {
+    /*
+     * Close signing up again, whether or not the probe that opened it got as far as finishing.
+     *
+     * The e2e suites share one database. Leaving it open would hand every later suite a portal
+     * that accepts accounts from outside, which is the wrong thing to test against and shows up
+     * only as some other suite failing for no visible reason.
+     */
+    await prisma.systemSetting.deleteMany({ where: { key: 'signup.enabled' } });
+
     const entities = await prisma.entity.findMany({
       where: { licenceNumber: { startsWith: 'AUDIT/' } },
       select: { id: true },
@@ -1322,6 +1344,18 @@ describe('audit coverage (e2e)', () => {
       expect(v2.actions).not.toHaveLength(0);
       const v2Id = v2.res.body.id as string;
 
+      // Retiring the new draft and bringing it back, before it is withdrawn below.
+      expect(
+        await auditFor('POST /api/v1/templates/:id/archive', () =>
+          request(server).post(`/api/v1/templates/${v2Id}/archive`).set(admin),
+        ),
+      ).not.toHaveLength(0);
+      expect(
+        await auditFor('POST /api/v1/templates/:id/restore', () =>
+          request(server).post(`/api/v1/templates/${v2Id}/restore`).set(admin),
+        ),
+      ).not.toHaveLength(0);
+
       expect(
         await auditFor('DELETE /api/v1/templates/:id/sections/:sectionId', () =>
           request(server)
@@ -1986,6 +2020,20 @@ describe('audit coverage (e2e)', () => {
        * password — neither of which should happen to an account the other probes depend on.
        */
       const email = 'audit-lifecycle@x.test';
+
+      /*
+       * Signing up is off unless the Authority has turned it on, so this probe has to turn it on
+       * before it can drive the route. That is not a workaround: an account created from outside
+       * is only reachable when somebody with the ADMIN role has deliberately opened the door, and
+       * this proves both halves - that the switch works, and that the account it then allows is
+       * still recorded.
+       */
+      await request(server)
+        .patch('/api/v1/settings/signup.enabled')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ value: true })
+        .expect(200);
+
       const signedUp = await probe(
         'POST /api/v1/auth/signup',
         () =>
@@ -2310,6 +2358,8 @@ describe('audit coverage (e2e)', () => {
     'POST /api/v1/templates',
     'PATCH /api/v1/templates/:id',
     'POST /api/v1/templates/:id/publish',
+    'POST /api/v1/templates/:id/archive',
+    'POST /api/v1/templates/:id/restore',
     'POST /api/v1/templates/:id/new-version',
     'DELETE /api/v1/templates/:id',
     'POST /api/v1/templates/:id/sections',

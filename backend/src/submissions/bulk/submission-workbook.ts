@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { AUTHORITY_NAME } from '../../exports/export-format';
 
 /**
  * The offline-filling workbook (Q11).
@@ -89,7 +90,8 @@ export async function buildSubmissionWorkbook(opts: {
   workbook.created = new Date();
   const sheet = workbook.addWorksheet('Return');
 
-  sheet.addRow(['National Communication Authority, South Sudan']).font = { bold: true, size: 13 };
+  // The shared constant, not a sixth copy of the name. This sheet had its own, and it was wrong.
+  sheet.addRow([AUTHORITY_NAME]).font = { bold: true, size: 13 };
   sheet.addRow([`${opts.templateName}, ${opts.periodLabel}`]).font = { bold: true, size: 11 };
   sheet.addRow([opts.entityName]).font = { color: { argb: 'FF666666' }, size: 10 };
   sheet.addRow([

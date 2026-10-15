@@ -10,6 +10,8 @@ import {
   FileText,
   Info,
   MessageSquare,
+  TrendingDown,
+  TrendingUp,
 } from 'lucide-react';
 import {
   Badge,
@@ -24,12 +26,15 @@ import {
   type SelectOption,
 } from '../components/ui';
 import { PublicIndicatorChart } from '../components/PublicIndicatorChart';
+import { BrandMark } from '../components/BrandMark';
+import { describePublishedChange, latestPublishedChange } from '../lib/published-change';
 import { publicPortalApi, publicPortalKeys } from '../lib/public-portal.api';
 import { getErrorMessage } from '../lib/api';
 import {
   COMPLAINT_CATEGORY_LABELS,
   ENTITY_TYPE_LABELS,
   PUBLIC_AGGREGATION_LABELS,
+  type PublicPoint,
   type PublicPortalFilters,
 } from '../lib/types';
 
@@ -137,10 +142,28 @@ export function OpenDataPage() {
             <ArrowLeft size={14} aria-hidden />
             {strings.action.backToSignIn}
           </Link>
-          <h1 className="mt-4 text-3xl font-semibold text-gray-900">
-            South Sudan communications sector
-          </h1>
-          <p className="mt-2 max-w-2xl text-gray-600">
+          {/*
+           * The seal, because this is the page the portal is most likely to be read on by people
+           * who have no account and no other reason to trust it: citizens, journalists, anybody
+           * quoting a sector figure. It should be obvious at a glance whose figures these are.
+           */}
+          {/*
+           * Stacked on a phone, side by side from `sm` up. Beside the seal at 320px, the heading's
+           * longest word ("communications" at 30px) had nowhere to go and pushed the page 17px
+           * wider than the screen, which the reflow check caught.
+           */}
+          <div className="mt-4 flex flex-col items-start gap-3 sm:flex-row sm:gap-4">
+            <BrandMark size={56} alt={`${strings.brand.authority} seal`} className="sm:mt-1" />
+            <div className="min-w-0">
+              <h1 className="break-words text-2xl font-semibold text-gray-900 sm:text-3xl">
+                South Sudan communications sector
+              </h1>
+              <p className="mt-1 text-sm font-medium text-gray-500">
+                {strings.brand.authorityFull}
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 max-w-2xl text-gray-600">
             Figures reported by licensed operators to the National Communication Authority, combined
             across the sector. Published once the Authority has approved the returns and closed the
             reporting period.
@@ -274,6 +297,7 @@ export function OpenDataPage() {
                     {PUBLIC_AGGREGATION_LABELS[indicator.aggregation]}
                   </span>
                 </div>
+                <IndicatorChange points={indicator.points} />
                 {indicator.description && (
                   <p className="mt-1 text-sm text-gray-600">{indicator.description}</p>
                 )}
@@ -349,5 +373,27 @@ export function OpenDataPage() {
         </p>
       </main>
     </div>
+  );
+}
+/**
+ * How the newest published figure compares with the last one before it.
+ *
+ * Only ever between two figures the Authority has already published. A period held back for
+ * disclosure is skipped, and the period actually compared against is named, because it may not be
+ * the quarter immediately before.
+ */
+function IndicatorChange({ points }: { points: PublicPoint[] }) {
+  const moved = latestPublishedChange(points);
+  if (!moved) return null;
+
+  const rising = moved.change > 0;
+  const tone = Math.round(moved.change * 100) === 0 ? 'text-gray-500' : 'text-gray-700';
+  const Icon = rising ? TrendingUp : TrendingDown;
+
+  return (
+    <p className={`mt-1 flex items-center gap-1.5 text-sm font-medium ${tone}`}>
+      {Math.round(moved.change * 100) !== 0 && <Icon size={15} aria-hidden />}
+      {describePublishedChange(moved)}
+    </p>
   );
 }

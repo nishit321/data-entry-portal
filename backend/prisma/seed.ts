@@ -1,3 +1,21 @@
+/* eslint-disable no-console -- a command-line tool reports by printing */
+/**
+ * The demonstration.
+ *
+ *   npm run prisma:seed
+ *
+ * An invented operator and its users, a twelve-field sample questionnaire, two closed quarters of
+ * approved returns so the charts draw something, published open-data figures, four network sites
+ * and two fibre routes, a penalty schedule line, two compliance cases with an enforcement order on
+ * each, and a 250-agent register.
+ *
+ * None of it belongs on a live server. It exists so that every screen has something on it: an
+ * empty portal demonstrates nothing, and a browser test needs something to look at.
+ *
+ * **For a real deployment, run `npm run seed:production` instead.** That creates the administrator
+ * and the reference lists and stops. This file calls those same two functions first, so a
+ * developer still gets one command.
+ */
 import {
   EntityStatus,
   EntityType,
@@ -10,7 +28,6 @@ import {
   NetworkSiteStatus,
   PeriodStatus,
   Prisma,
-  PrismaClient,
   PublicAggregation,
   ReferenceCategory,
   ReportingFrequency,
@@ -21,35 +38,7 @@ import {
   TemplateStatus,
 } from '@prisma/client';
 import { hashPassword } from '../src/common/utils/password.util';
-
-const prisma = new PrismaClient();
-
-/** Create the initial ADMIN account if it does not exist. */
-async function seedAdmin() {
-  const email = (process.env.SEED_ADMIN_EMAIL || 'admin@nca.gov.ss').toLowerCase();
-  const password = process.env.SEED_ADMIN_PASSWORD || 'Admin@12345';
-
-  if (await prisma.user.findUnique({ where: { email } })) {
-    console.log(`Admin already exists: ${email}`);
-    return;
-  }
-
-  await prisma.user.create({
-    data: {
-      email,
-      passwordHash: await hashPassword(password),
-      firstName: 'System',
-      lastName: 'Administrator',
-      role: Role.ADMIN,
-      isActive: true,
-    },
-  });
-
-  console.log('Seeded admin account:');
-  console.log(`  email:    ${email}`);
-  console.log(`  password: ${password}`);
-  console.log('  (change this password after first login)');
-}
+import { prisma, seedAdmin, seedReferenceData } from './seed-core';
 
 /**
  * The three Authority reviewers (Checker → Verifier → Approver) so the review workflow can be
@@ -141,92 +130,6 @@ async function seedDemoOperator() {
       location: 'Juba',
     },
   });
-}
-
-/**
- * Seed the managed lookup lists from the questionnaire's controlled fields.
- * Idempotent and non-destructive: existing rows (incl. admin edits) are left
- * untouched. "Other" is handled as a controlled free-text pair, not seeded here.
- */
-async function seedReferenceData() {
-  const lists: Record<ReferenceCategory, { code: string; label: string }[]> = {
-    SPECTRUM_BAND: [
-      { code: 'MHZ_700', label: '700 MHz' },
-      { code: 'MHZ_800', label: '800 MHz' },
-      { code: 'MHZ_900', label: '900 MHz' },
-      { code: 'MHZ_1800', label: '1800 MHz' },
-      { code: 'MHZ_2100', label: '2100 MHz' },
-      { code: 'MHZ_2600', label: '2600 MHz' },
-      { code: 'MHZ_3500', label: '3500 MHz' },
-    ],
-    TECHNOLOGY: [
-      { code: '2G', label: '2G' },
-      { code: '3G', label: '3G' },
-      { code: '4G', label: '4G' },
-      { code: '5G', label: '5G' },
-      { code: 'FIBER', label: 'Fibre' },
-      { code: 'WIRELESS_BROADBAND', label: 'Wireless Broadband' },
-      { code: 'MICROWAVE', label: 'Microwave' },
-      { code: 'VSAT', label: 'VSAT' },
-    ],
-    SERVICE_TYPE: [
-      { code: 'MOBILE_VOICE', label: 'Mobile Voice' },
-      { code: 'MOBILE_DATA', label: 'Mobile Data' },
-      { code: 'MOBILE_MONEY', label: 'Mobile Money Services' },
-      { code: 'FIXED_INTERNET', label: 'Fixed Internet' },
-      { code: 'VAS', label: 'Value-Added Services (VAS)' },
-    ],
-    GEO_CLASSIFICATION: [
-      { code: 'URBAN', label: 'Urban' },
-      { code: 'PERI_URBAN', label: 'Peri-urban' },
-      { code: 'RURAL', label: 'Rural' },
-    ],
-    ENERGY_GENERATION_TYPE: [
-      { code: 'DIESEL', label: 'Diesel' },
-      { code: 'WIND', label: 'Wind' },
-      { code: 'SOLAR', label: 'Solar' },
-      { code: 'HYBRID', label: 'Hybrid' },
-    ],
-    ENERGY_STORAGE_TYPE: [
-      { code: 'LITHIUM_ION', label: 'Lithium-ion storage' },
-      { code: 'OTHER_CHEMICAL', label: 'Other chemical storage' },
-      { code: 'CAPACITIVE', label: 'Capacitive storage' },
-    ],
-    FIXED_ACCESS_TYPE: [
-      { code: 'DSL', label: 'DSL' },
-      { code: 'FIBER', label: 'Fibre' },
-      { code: 'SATELLITE_LEO', label: 'Satellite (LEO)' },
-      { code: 'SATELLITE_GEO', label: 'Satellite (geostationary)' },
-      { code: 'WIRELESS_BROADBAND', label: 'Wireless Broadband' },
-    ],
-    TRANSACTION_TYPE: [
-      { code: 'CASH_IN', label: 'Cash-in' },
-      { code: 'CASH_OUT', label: 'Cash-out' },
-      { code: 'P2P', label: 'Peer-to-peer (P2P) transfers' },
-      { code: 'MERCHANT_PAYMENT', label: 'Merchant payments' },
-      { code: 'BILL_PAYMENT', label: 'Bill payments' },
-      { code: 'BULK_DISBURSEMENT', label: 'Bulk disbursements' },
-      { code: 'CROSS_NETWORK', label: 'Cross-network (interoperable)' },
-    ],
-  };
-
-  let count = 0;
-  for (const [category, items] of Object.entries(lists) as [
-    ReferenceCategory,
-    { code: string; label: string }[],
-  ][]) {
-    for (let i = 0; i < items.length; i++) {
-      await prisma.referenceItem.upsert({
-        where: { category_code: { category, code: items[i].code } },
-        update: {},
-        create: { category, code: items[i].code, label: items[i].label, sortOrder: i },
-      });
-      count++;
-    }
-  }
-  console.log(
-    `Seeded reference data (${count} items across ${Object.keys(lists).length} categories).`,
-  );
 }
 
 /**
@@ -1062,7 +965,27 @@ async function seedAgentRegister() {
   console.log(`Seeded ${AGENTS} agents across ${towns.length} towns.`);
 }
 
+/**
+ * Refuse to invent an operator on a live server.
+ *
+ * The demonstration data is indistinguishable from real data once it is in: "Demo Telecom" appears
+ * in the operator list, its returns count towards sector figures, and its 250 agents are on the
+ * map. Removing it afterwards is a manual job on a running system, which is exactly the situation
+ * this refusal exists to prevent.
+ */
+function assertNotProduction(): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'This is the demonstration seed and NODE_ENV is production. It would create an invented ' +
+        'operator, its returns and 250 agents on a live server.\n' +
+        'Run `npm run seed:production` instead: the administrator and the reference lists, and ' +
+        'nothing else.',
+    );
+  }
+}
+
 async function main() {
+  assertNotProduction();
   await seedAdmin();
   await seedReviewers();
   await seedDemoOperator();
@@ -1077,8 +1000,10 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error(e);
-    process.exit(1);
+    // The message, not the stack. Every failure this can produce is something a person has to
+    // read and act on, and a refusal buried under twelve lines of Node internals reads as a crash.
+    console.error(e instanceof Error ? e.message : e);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

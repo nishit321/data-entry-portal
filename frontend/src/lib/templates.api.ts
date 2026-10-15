@@ -76,6 +76,14 @@ export const templatesApi = {
   newVersion: (id: string) =>
     api.post<ReportingTemplate>(`/templates/${id}/new-version`, {}).then((r) => r.data),
 
+  /** Take it out of use. Nothing already filed against it is touched. */
+  archive: (id: string) =>
+    api.post<ReportingTemplate>(`/templates/${id}/archive`).then((r) => r.data),
+
+  /** Bring an archived one back, as a draft. Publishing it again is a separate, deliberate act. */
+  restore: (id: string) =>
+    api.post<ReportingTemplate>(`/templates/${id}/restore`).then((r) => r.data),
+
   remove: (id: string) => api.delete<{ message: string }>(`/templates/${id}`).then((r) => r.data),
 
   addSection: (id: string, body: SectionInput) =>

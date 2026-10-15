@@ -22,6 +22,9 @@ const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
 );
 const UsersPage = lazy(() => import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })));
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 const EntitiesPage = lazy(() =>
   import('./pages/EntitiesPage').then((m) => ({ default: m.EntitiesPage })),
 );
@@ -246,6 +249,7 @@ const router = createBrowserRouter([
       { path: '/templates/:id', element: <TemplateEditorPage /> },
       { path: '/reporting-periods', element: <ReportingPeriodsPage /> },
       { path: '/users', element: <UsersPage /> },
+      { path: '/settings', element: <SettingsPage /> },
     ],
   ),
 

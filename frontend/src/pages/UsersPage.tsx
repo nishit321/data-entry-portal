@@ -372,12 +372,14 @@ export function UsersPage() {
               icon={Power}
               label={u.isActive ? 'Deactivate this user' : 'Activate this user'}
               disabled={isSelf}
+              disabledReason="You cannot change your own account's status. Ask another administrator."
               onClick={() => toggleMutation.mutate(u)}
             />
             <IconButton
               icon={ShieldOff}
               label="Reset this user's authenticator app"
               disabled={isSelf}
+              disabledReason="To reset your own authenticator app, use your profile page."
               onClick={() => setPendingMfaReset(u)}
             />
             <IconButton
@@ -385,6 +387,7 @@ export function UsersPage() {
               label="Delete this user"
               variant="danger"
               disabled={isSelf}
+              disabledReason="You cannot delete your own account. Ask another administrator."
               onClick={() => setPendingDelete(u)}
             />
           </div>

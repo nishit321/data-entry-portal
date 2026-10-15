@@ -3,6 +3,7 @@ import { EnforcementStatus, Prisma, ReviewStage, SubmissionStatus } from '@prism
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { entityScopeFilter } from '../common/utils/data-scope.util';
+import { obligedEntityFilter, typesObligedBy } from '../common/utils/filing-obligation.util';
 import { AnalyticsQueryDto, TrendsQueryDto } from './dto/analytics-query.dto';
 
 @Injectable()
@@ -112,7 +113,15 @@ export class AnalyticsService {
       where: periodWhere,
       orderBy: { dueDate: 'desc' },
       take: query.periods,
-      select: { id: true, label: true, dueDate: true },
+      select: {
+        id: true,
+        label: true,
+        dueDate: true,
+        // Who owed a return for this period. Without it a chart can only show how many returns
+        // arrived, which says nothing on its own: a quiet period and a period half the sector
+        // ignored produce the same short bar.
+        template: { select: { sections: { select: { applicableEntityTypes: true } } } },
+      },
     });
     if (recent.length === 0) return { periods: [] };
     const periodIds = recent.map((p) => p.id);
@@ -124,7 +133,21 @@ export class AnalyticsService {
       submittedAt: { not: null },
     };
 
-    const [byStatus, byTimeliness] = await Promise.all([
+    /*
+     * The denominator, period by period.
+     *
+     * Two things to know about it. It is the register as it stands today, not as it stood at the
+     * deadline, because licence status is not kept as a history; and it is narrowed to the one
+     * operator when the reader is an operator, so their own chart compares them against their own
+     * obligation rather than the sector's.
+     */
+    const typesPerPeriod = new Map(
+      recent.map((p) => [p.id, new Set(typesObligedBy(p.template.sections))]),
+    );
+    const allTypes = [...new Set([...typesPerPeriod.values()].flatMap((t) => [...t]))];
+    const subjectId = entityScopeFilter(user) ?? query.entityId;
+
+    const [byStatus, byTimeliness, obliged] = await Promise.all([
       this.prisma.submission.groupBy({
         by: ['periodId', 'status'],
         where: scopedWhere,
@@ -136,6 +159,13 @@ export class AnalyticsService {
         where: scopedWhere,
         _count: true,
         orderBy: { periodId: 'asc' },
+      }),
+      this.prisma.entity.findMany({
+        where: {
+          ...obligedEntityFilter(allTypes),
+          ...(subjectId ? { id: subjectId } : {}),
+        },
+        select: { id: true, type: true },
       }),
     ]);
 
@@ -149,15 +179,24 @@ export class AnalyticsService {
           byTimeliness.find((r) => r.periodId === p.id && r.isLate === false)?._count ?? 0;
         const late =
           byTimeliness.find((r) => r.periodId === p.id && r.isLate === true)?._count ?? 0;
+        const types = typesPerPeriod.get(p.id) ?? new Set();
+        const expected = obliged.filter((e) => types.has(e.type)).length;
+        const filed = onTime + late;
+
         return {
           periodId: p.id,
           label: p.label,
           dueDate: p.dueDate,
-          filed: onTime + late,
+          filed,
           onTime,
           late,
           approved: status(SubmissionStatus.APPROVED),
           rejected: status(SubmissionStatus.REJECTED),
+          expected,
+          // `filed` counts one live return per operator, so this is a headcount of who is missing.
+          // Clamped, because an operator that filed and had its licence suspended afterwards is
+          // still counted in `filed` but no longer owes anything: that is a zero, not a negative.
+          notFiled: Math.max(0, expected - filed),
         };
       });
 

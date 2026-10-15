@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
@@ -30,12 +32,22 @@ const PUBLIC: Record<string, string> = {
   'POST /api/v1/auth/resend-otp': 'the code did not arrive; the user is still signing in.',
   'POST /api/v1/auth/signup': 'an operator with no account yet asks for one.',
   'POST /api/v1/auth/forgot-password': 'reached precisely by people who cannot sign in.',
+
+  'GET /api/v1/settings/public':
+    'the sign-in screen cannot know whether to offer "create an account" without asking, and it ' +
+    'asks before it has a token. Returns the values of the settings marked public and nothing ' +
+    'else: no labels, no bounds, and no sign of what other settings exist.',
   'POST /api/v1/auth/reset-password': 'the same, carrying a single-use token instead of a session.',
 
   'GET /api/v1/public/overview':
     'the citizen-facing portal (Q4). Aggregated and disclosure-controlled.',
   'GET /api/v1/public/indicators': 'the same: published sector figures, never operator-level.',
   'GET /api/v1/public/complaints-summary': 'the same: counts, not complainants.',
+  'GET /api/v1/public/operators':
+    'who holds a licence, so the complaint form can ask which operator a complaint is about. The ' +
+    'one place the public side names an operator, and deliberately: the rule protects commercial ' +
+    'figures, and who holds a licence is public record. Id, name and type only, active operators ' +
+    'only, nothing joinable to a figure.',
   'GET /api/v1/public/periods':
     'the closed periods the public filter offers. A label and a due date, neither confidential ' +
     'and neither saying anything about who filed.',
@@ -66,6 +78,11 @@ const ANY_SIGNED_IN: Record<string, string> = {
     "spends the Authority's SMS balance and rings somebody's handset.",
   'POST /api/v1/auth/phone/verify': "confirms the caller's own number against a code sent to it.",
   'DELETE /api/v1/auth/phone': "removes the caller's own number.",
+
+  'POST /api/v1/auth/refresh':
+    'a session belongs to whoever holds it: every signed-in user renews their own and nobody ' +
+    "else's. The guard rejects an expired token before this runs, so it can only lengthen a live " +
+    'session, never revive a dead one.',
 
   'GET /api/v1/auth/totp':
     "whether an authenticator app is set up on the caller's own account, and whether the server " +
@@ -132,6 +149,26 @@ describe('route inventory (e2e)', () => {
         'These routes need no authentication at all. If that is deliberate, add the reason to ' +
           'PUBLIC in this spec. If it is not, add @Roles(), or remove @Public().\n  ' +
           unexplained.join('\n  '),
+      );
+    }
+  });
+
+  it('is listed in the published API reference', () => {
+    /*
+     * docs/API_ROUTES.md is generated from this same census, so it cannot be wrong about a route
+     * it mentions. What it can be is out of date: a route added since anybody last ran the
+     * generator is simply absent, and an integrator reading it would never know the route exists.
+     * This is the reminder.
+     */
+    const reference = readFileSync(join(__dirname, '..', '..', 'docs', 'API_ROUTES.md'), 'utf8');
+    const missing = routes
+      .filter((r) => !reference.includes(`| ${r.method} | \`${r.path}\` |`))
+      .map((r) => r.signature);
+    if (missing.length > 0) {
+      throw new Error(
+        'These routes are not in docs/API_ROUTES.md. Run `npm run docs:api` in backend/ and ' +
+          'commit the result:\n  ' +
+          missing.join('\n  '),
       );
     }
   });

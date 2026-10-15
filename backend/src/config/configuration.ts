@@ -14,7 +14,6 @@ export interface AppConfig {
 
 export interface JwtConfig {
   secret: string;
-  expiresIn: string;
 }
 
 export interface ResetConfig {
@@ -115,8 +114,10 @@ export default () => ({
       .filter(Boolean),
   } as AppConfig,
   jwt: {
+    // How long a token lives is not configured here. It follows the "session.idleMinutes"
+    // setting, which an administrator changes from the Settings screen, so the two cannot
+    // disagree. JWT_EXPIRES_IN is no longer read; see docs/OPERATIONS.md.
     secret: process.env.JWT_SECRET as string,
-    expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
   } as JwtConfig,
   reset: {
     frontendUrl: process.env.FRONTEND_RESET_URL ?? 'http://localhost:5173/reset-password',

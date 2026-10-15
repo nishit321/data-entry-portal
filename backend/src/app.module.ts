@@ -13,6 +13,7 @@ import { UsersModule } from './users/users.module';
 import { EntitiesModule } from './entities/entities.module';
 import { AgentsModule } from './agents/agents.module';
 import { ReferenceDataModule } from './reference-data/reference-data.module';
+import { SettingsModule } from './settings/settings.module';
 import { TemplatesModule } from './templates/templates.module';
 import { ReportingPeriodsModule } from './reporting-periods/reporting-periods.module';
 import { SubmissionsModule } from './submissions/submissions.module';
@@ -69,6 +70,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     EntitiesModule,
     AgentsModule,
     ReferenceDataModule,
+    SettingsModule,
     TemplatesModule,
     ReportingPeriodsModule,
     SubmissionsModule,

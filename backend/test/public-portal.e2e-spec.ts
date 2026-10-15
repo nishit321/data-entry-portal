@@ -249,6 +249,53 @@ describe('Public portal (e2e)', () => {
       expect(json).not.toContain('Pub Op');
     });
 
+    it('names the licensed operators, and tells the public nothing else about them', async () => {
+      /*
+       * The one endpoint on the public side that names an operator (NCA, 16 September 2026).
+       *
+       * It exists because the complaint desk is reached without an account, and a citizen has to
+       * be able to say who their complaint is about. Who holds a licence is public record; what
+       * that licensee earns is not, and this test is the line between the two.
+       *
+       * Asserted as an absence, because the failure would be additive: somebody widening the
+       * select one afternoon to include a licence number or an address, on an endpoint anybody on
+       * the internet can read.
+       */
+      const res = await request(server).get('/api/v1/public/operators').expect(200);
+
+      const operators = res.body.operators as { id: string; name: string; type: string }[];
+      expect(operators.length).toBeGreaterThan(0);
+      // Exactly three fields. Not "contains these three".
+      expect(Object.keys(operators[0]).sort()).toEqual(['id', 'name', 'type']);
+
+      const json = JSON.stringify(res.body);
+      expect(json).not.toContain('licenceNumber');
+      expect(json).not.toContain('headquartersAddress');
+      expect(json).not.toContain('contact');
+    });
+
+    it('leaves a deregistered operator off the list', async () => {
+      /*
+       * Offering one would invite a complaint about a company the Authority no longer licenses,
+       * which is a different process and not one this desk can take.
+       */
+      const entity = await prisma.entity.findFirstOrThrow({
+        where: { licenceNumber: licences[0] },
+        select: { id: true, status: true },
+      });
+      await prisma.entity.update({
+        where: { id: entity.id },
+        data: { status: EntityStatus.DEREGISTERED },
+      });
+      try {
+        const res = await request(server).get('/api/v1/public/operators').expect(200);
+        const ids = (res.body.operators as { id: string }[]).map((o) => o.id);
+        expect(ids).not.toContain(entity.id);
+      } finally {
+        await prisma.entity.update({ where: { id: entity.id }, data: { status: entity.status } });
+      }
+    });
+
     it('publishes nothing until NCA has put something on the list', async () => {
       const res = await request(server).get('/api/v1/public/indicators').expect(200);
       expect(ourIndicators(res.body, 'People connected')).toBeUndefined();

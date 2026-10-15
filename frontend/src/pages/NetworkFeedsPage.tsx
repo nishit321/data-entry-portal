@@ -291,6 +291,7 @@ export function NetworkFeedsPage() {
                 <Button
                   icon={Plus}
                   disabled={agreements.length === 0}
+                  disabledReason="Record a data-sharing agreement first. Every feed runs under one."
                   onClick={() => setFeedOpen(true)}
                 >
                   Add a feed
@@ -642,7 +643,7 @@ export function NetworkFeedsPage() {
               options={agreementOptions}
               value={feedForm.agreementId}
               onChange={(agreementId) => setFeedForm({ ...feedForm, agreementId })}
-              placeholder="Choose an agreement"
+              placeholder="Select an agreement"
             />
           </Field>
           <Field label={strings.field.name} htmlFor="fd-name">

@@ -302,6 +302,35 @@ export class PublicPortalService {
     });
   }
 
+  /**
+   * The licensed operators, by name, so a citizen filing a complaint can say who it is about.
+   *
+   * This is the one place the public side names an operator, and it is worth saying why that is
+   * not a break in the rule the rest of this service follows.
+   *
+   * The rule is about **figures**: an operator's revenue, subscribers, float and coverage are
+   * commercially sensitive and are published only aggregated across the sector. Who holds a licence
+   * is the opposite kind of fact. It is a matter of public record, the Authority publishes a
+   * licence register, and the person reaching this endpoint is typing a complaint about a company
+   * whose name they already know and whose shop they were standing in.
+   *
+   * What it returns is the minimum that makes a dropdown work: an id, a name, and the kind of
+   * operator. No licence number, no address, no contact, no status beyond being active, and
+   * nothing that could be joined to a figure. A citizen who cannot name the operator simply leaves
+   * it blank, which is what happens today for every complaint on file.
+   *
+   * Active only. Offering a deregistered operator would invite complaints about a company the
+   * Authority no longer licenses, which is a different process.
+   */
+  async operators() {
+    const operators = await this.prisma.entity.findMany({
+      where: { deletedAt: null, status: EntityStatus.ACTIVE },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, type: true },
+    });
+    return { operators };
+  }
+
   /** Headline figures for the top of the public page. Counts of operators, never their figures. */
   async overview() {
     const [operators, byType, periods] = await Promise.all([

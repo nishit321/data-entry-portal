@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { Alert, Button, FormField, Input, PasswordInput } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { usePublicSettings } from '../hooks/usePublicSettings';
 import { authApi } from '../lib/auth.api';
 import { getErrorMessage } from '../lib/api';
 import { isMfaChallenge, type MfaChallenge } from '../lib/types';
@@ -24,6 +25,7 @@ const RESEND_COOLDOWN_SEC = 30;
 
 export function LoginPage() {
   const { setSession } = useAuth();
+  const { signupEnabled } = usePublicSettings();
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: Location })?.from?.pathname ?? '/';
@@ -183,12 +185,21 @@ export function LoginPage() {
       subtitle="Welcome back. Sign in to continue."
       footer={
         <>
-          <div>
-            Don&apos;t have an account?{' '}
-            <Link to="/signup" className="font-medium text-brand hover:underline">
-              Create one
-            </Link>
-          </div>
+          {/*
+           * Only offered when the Authority has opened it.
+           *
+           * Shown on `=== true` rather than on anything truthy, because the answer is undefined
+           * until it arrives. Treating "not known yet" as "allowed" would flash an invitation
+           * that the server then refuses, which is worse than the link appearing a moment late.
+           */}
+          {signupEnabled === true && (
+            <div>
+              Don&apos;t have an account?{' '}
+              <Link to="/signup" className="font-medium text-brand hover:underline">
+                Create one
+              </Link>
+            </div>
+          )}
           {/* The complaint desk needs no account, so it has to be reachable from the front door. */}
           <div className="mt-2">
             Reporting a problem with a service?{' '}

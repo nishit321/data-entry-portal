@@ -1,5 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, FieldType, Prisma, RuleSeverity, TemplateStatus } from '@prisma/client';
+import {
+  AuditAction,
+  FieldType,
+  PeriodStatus,
+  Prisma,
+  RuleSeverity,
+  TemplateStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { RequestContext } from '../common/utils/request-context.util';
@@ -216,6 +223,88 @@ export class TemplatesService {
   }
 
   /** Soft-delete: templates are retained for audit/history. */
+  /**
+   * Take a questionnaire out of use without destroying it.
+   *
+   * Archiving happened only as a side effect before this: publishing version two archived version
+   * one, and nothing else ever set the status. A questionnaire the Authority had simply stopped
+   * using had to be deleted, and deleting is refused the moment a single return points at it -
+   * which, for any questionnaire that was ever used, is always. So there was no way to retire one.
+   *
+   * What archiving does *not* do is touch anything already filed. The periods stay, the returns
+   * stay, and a return filed against this questionnaire still reads correctly. It stops it being
+   * offered for new reporting periods, which is the thing the Authority actually wanted.
+   */
+  async archive(id: string, actorId: string, ctx: RequestContext) {
+    const template = await this.prisma.reportingTemplate.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        periods: {
+          where: { deletedAt: null, status: { in: [PeriodStatus.OPEN, PeriodStatus.SCHEDULED] } },
+          select: { label: true },
+          take: 3,
+        },
+      },
+    });
+    if (!template) throw new NotFoundException('Template not found');
+    if (template.status === TemplateStatus.ARCHIVED) {
+      throw new BadRequestException('This template is already archived.');
+    }
+
+    /*
+     * Not while operators are filing against it.
+     *
+     * An open period is a deadline somebody is working to. Archiving the questionnaire underneath
+     * it would leave them mid-return against something the Authority has retired, and a scheduled
+     * period would open onto a questionnaire that is no longer in use. Close the periods first,
+     * which is a decision with its own consequences and belongs to whoever is making it.
+     */
+    if (template.periods.length > 0) {
+      const labels = template.periods.map((p) => p.label).join(', ');
+      throw new BadRequestException(
+        `Operators are still filing against this template (${labels}). Close those reporting periods first.`,
+      );
+    }
+
+    await this.prisma.reportingTemplate.update({
+      where: { id },
+      data: { status: TemplateStatus.ARCHIVED },
+    });
+    await this.record(AuditAction.TEMPLATE_ARCHIVED, id, actorId, ctx, { name: template.name });
+    return this.findOne(id);
+  }
+
+  /**
+   * Bring an archived questionnaire back, as a draft.
+   *
+   * Always a draft, never straight back to published, and that is the whole of the design. Two
+   * published versions of the same questionnaire cannot both be in force: a reporting period
+   * binds to one of them, and "the current version" would stop having an answer. Restoring to
+   * draft leaves the Authority to publish it deliberately, through the same checks any other
+   * publication goes through - which is also where the old published version gets archived in its
+   * turn, by the existing rule.
+   */
+  async restore(id: string, actorId: string, ctx: RequestContext) {
+    const template = await this.prisma.reportingTemplate.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, name: true, status: true },
+    });
+    if (!template) throw new NotFoundException('Template not found');
+    if (template.status !== TemplateStatus.ARCHIVED) {
+      throw new BadRequestException('Only an archived template can be restored.');
+    }
+
+    await this.prisma.reportingTemplate.update({
+      where: { id },
+      data: { status: TemplateStatus.DRAFT, publishedAt: null },
+    });
+    await this.record(AuditAction.TEMPLATE_RESTORED, id, actorId, ctx, { name: template.name });
+    return this.findOne(id);
+  }
+
   async remove(id: string, actorId: string, ctx: RequestContext) {
     const template = await this.prisma.reportingTemplate.findFirst({
       where: { id, deletedAt: null },

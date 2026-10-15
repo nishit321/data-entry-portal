@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -82,6 +84,28 @@ export class TemplatesController {
     @ClientContext() ctx: RequestContext,
   ) {
     return this.templates.newVersion(id, actorId, ctx);
+  }
+
+  @Post(':id/archive')
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  archive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') actorId: string,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.templates.archive(id, actorId, ctx);
+  }
+
+  @Post(':id/restore')
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  restore(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('id') actorId: string,
+    @ClientContext() ctx: RequestContext,
+  ) {
+    return this.templates.restore(id, actorId, ctx);
   }
 
   @Delete(':id')

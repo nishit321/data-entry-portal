@@ -20,6 +20,7 @@
     "test:e2e:setup": "ts-node test/setup-test-db.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "seed:production": "ts-node -T prisma/seed-production.ts",
     "prisma:seed": "ts-node prisma/seed.ts",
     "seed:questionnaire": "ts-node -T prisma/seed-nca-questionnaire.ts",
     "seed:demo-templates": "ts-node -T prisma/seed-demo-templates.ts",
@@ -31,6 +32,7 @@
     "restore": "ts-node -T scripts/restore.ts",
     "backup:verify": "ts-node -T scripts/verify-restore.ts",
     "routes": "ts-node -T scripts/routes.ts",
+    "docs:api": "ts-node -T scripts/api-reference.ts",
     "preflight": "ts-node -T scripts/preflight.ts",
     "sms:test": "ts-node -T scripts/sms-test.ts"
   },

@@ -22,6 +22,10 @@ or `frontend/`, not from the repository root.
 `"eslint-plugin-copy": "file:../tools/eslint-plugin-copy"`, so `npm install`
 fails in either project if that folder is missing.
 
+**Documentation** lives in [`docs/`](docs/README.md), with an index of which
+document is for whom: guides for operators and Authority staff, the API, how to
+deploy and run a server, and the coding standards.
+
 ---
 
 ## Prerequisites

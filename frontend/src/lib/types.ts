@@ -703,6 +703,10 @@ export interface AnalyticsTrendPoint {
   late: number;
   approved: number;
   rejected: number;
+  /** How many operators owed a return for this period. */
+  expected: number;
+  /** How many of them never filed one. */
+  notFiled: number;
 }
 
 export interface AnalyticsTrends {
@@ -1215,6 +1219,18 @@ export interface PublicPortalFilters {
   to?: string;
   indicatorId?: string;
   search?: string;
+}
+
+/**
+ * A licensed operator, as the public complaint form sees it.
+ *
+ * Three fields, and the narrowness is the point: the public side names an operator only so a
+ * citizen can say who a complaint is about. Anything more would be joinable to a figure.
+ */
+export interface PublicOperator {
+  id: string;
+  name: string;
+  type: EntityType;
 }
 
 export interface PublicComplaintsSummary {

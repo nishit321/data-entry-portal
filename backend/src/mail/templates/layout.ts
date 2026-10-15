@@ -88,8 +88,29 @@ export function baseLayout(opts: {
   contentHtml: string;
   preheader?: string;
   year: number;
+  /** Absolute URL of the seal. Omitted when the server cannot work out its own address. */
+  logoUrl?: string;
 }): string {
-  const { title, contentHtml, preheader = '', year } = opts;
+  const { title, contentHtml, preheader = '', year, logoUrl } = opts;
+
+  /*
+   * The seal beside the wording, laid out as a table because that is the only layout every mail
+   * client agrees on - floats and flexbox are not safe here.
+   *
+   * The image is the version on a white ground, not the transparent one: a dark-mode client is
+   * free to recolour the band behind it, and a transparent seal would then be a cyan smudge on
+   * whatever it chose. White keeps it looking like the seal on a letterhead.
+   *
+   * It is also only ever decoration. Every client that blocks images, and every reader using a
+   * screen reader, gets the Authority's name in text right beside it, so the alt is empty rather
+   * than repeating what is already written.
+   */
+  const seal = logoUrl
+    ? `<td width="48" style="padding-right:14px;vertical-align:middle;">
+                  <img src="${logoUrl}" width="48" height="48" alt=""
+                       style="display:block;width:48px;height:48px;border:0;border-radius:50%;" />
+                </td>`
+    : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -108,12 +129,19 @@ export function baseLayout(opts: {
           <!-- Header -->
           <tr>
             <td style="background-color:${BRAND};padding:24px 32px;">
-              <div style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">
-                National Communication Authority
-              </div>
-              <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#cbd5e1;margin-top:2px;">
-                Data Collection Portal
-              </div>
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  ${seal}
+                  <td style="vertical-align:middle;">
+                    <div style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;color:#ffffff;letter-spacing:0.3px;">
+                      National Communication Authority
+                    </div>
+                    <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#cbd5e1;margin-top:2px;">
+                      Data Collection Portal
+                    </div>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
           <!-- Accent bar -->

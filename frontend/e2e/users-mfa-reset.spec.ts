@@ -21,8 +21,15 @@ test('is offered on every user except yourself', async ({ page }) => {
 
   // Exactly one row is the signed-in administrator, and theirs is disabled: an administrator who
   // could reset their own second factor could shed it from a session already open.
+  //
+  // Counted as `disabled` or `aria-disabled`. A control disabled *with a reason* keeps its focus
+  // and uses `aria-disabled` instead, so a keyboard user can still reach it and hear why
+  // (FRONTEND_STANDARDS §3.14). Reading only the `disabled` property counted those as enabled.
   const disabled = await buttons.evaluateAll(
-    (els) => els.filter((el) => (el as HTMLButtonElement).disabled).length,
+    (els) =>
+      els.filter(
+        (el) => (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true',
+      ).length,
   );
   expect(disabled).toBe(1);
 });

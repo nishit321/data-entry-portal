@@ -44,8 +44,31 @@ export class MailService {
     return new Date().getFullYear();
   }
 
+  /**
+   * The Authority's seal, as an address a mail client can actually fetch.
+   *
+   * Email cannot use a relative path, so this is built from the sign-in URL the portal is already
+   * configured with. That is deliberate: a separate variable for the logo would be one more thing
+   * to set on a new server, and it would be wrong on exactly the deployments where nobody noticed
+   * it. If the sign-in URL is good enough to send people to, its origin is good enough to serve
+   * an image from.
+   *
+   * Returns undefined rather than a guess when the URL will not parse. An email with a broken
+   * image placeholder looks less official than one with no image at all.
+   */
+  private get logoUrl(): string | undefined {
+    try {
+      return new URL('/brand/nca-logo-email.png', this.loginUrl).toString();
+    } catch {
+      return undefined;
+    }
+  }
+
   async sendPasswordReset(to: string, resetUrl: string, expiresInMinutes: number): Promise<void> {
-    await this.send(to, passwordResetEmail({ resetUrl, expiresInMinutes, year: this.year }));
+    await this.send(
+      to,
+      passwordResetEmail({ resetUrl, expiresInMinutes, year: this.year, logoUrl: this.logoUrl }),
+    );
   }
 
   async sendOtpCode(
@@ -57,7 +80,15 @@ export class MailService {
   ): Promise<void> {
     await this.send(
       to,
-      otpEmail({ firstName, lastName, email: to, code, expiresInMinutes, year: this.year }),
+      otpEmail({
+        firstName,
+        lastName,
+        email: to,
+        code,
+        expiresInMinutes,
+        year: this.year,
+        logoUrl: this.logoUrl,
+      }),
     );
   }
 
@@ -69,6 +100,7 @@ export class MailService {
         temporaryPassword,
         loginUrl: this.loginUrl,
         year: this.year,
+        logoUrl: this.logoUrl,
       }),
     );
   }
@@ -97,6 +129,7 @@ export class MailService {
         actionUrl: opts.actionUrl,
         actionLabel: opts.actionLabel,
         year: this.year,
+        logoUrl: this.logoUrl,
       }),
     );
   }
@@ -116,7 +149,12 @@ export class MailService {
   }): Promise<void> {
     await this.sendOrThrow(
       opts.to,
-      notificationEmail({ title: opts.title, body: opts.body, year: this.year }),
+      notificationEmail({
+        title: opts.title,
+        body: opts.body,
+        year: this.year,
+        logoUrl: this.logoUrl,
+      }),
       { subject: opts.subject, attachments: [opts.attachment] },
     );
   }

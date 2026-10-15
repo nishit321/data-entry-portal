@@ -143,3 +143,47 @@ describe('colour contrast', () => {
     expect(contrast('text-gray-500', 'bg-gray-50')).toBeGreaterThanOrEqual(UI_AA);
   });
 });
+
+/*
+ * The component sources, read back as text, the same way `strings.test.ts` reads them.
+ */
+const SOURCES = import.meta.glob('../**/*.tsx', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+/**
+ * A grey too light to read, caught in the source rather than in a browser.
+ *
+ * `text-gray-400` is about 2.5:1 on white and 2.4:1 on gray-50, under half of what AA asks for
+ * text, and this product has never allowed it for words. It slipped into a dashboard card anyway
+ * ("No comparison") and was only found when the browser suite's axe pass reached the dashboard,
+ * forty minutes into a run. jsdom cannot see colour, so none of the unit tests could.
+ *
+ * Icons may still use it: a decorative icon is `aria-hidden`, carries no words, and is not held to
+ * the text bar. So the rule is narrow, and it is the one that was broken: an element whose class
+ * list has `text-gray-400` must be marked `aria-hidden`.
+ */
+describe('text colours too light to read', () => {
+  const files = Object.entries(SOURCES).filter(([path]) => !path.endsWith('.test.tsx'));
+
+  it('is reading the real component tree', () => {
+    expect(files.length).toBeGreaterThan(60);
+  });
+
+  it('never puts gray-400 on anything a person has to read', () => {
+    const offenders: string[] = [];
+    for (const [path, source] of files) {
+      // Each opening tag, attributes and all, so a multi-line element is judged as one.
+      for (const tag of source.matchAll(/<[A-Za-z][\w.]*\b[^<>]*?className=[^<>]*?>/gs)) {
+        const text = tag[0];
+        if (!/\btext-gray-400\b/.test(text)) continue;
+        if (/aria-hidden/.test(text)) continue;
+        const line = source.slice(0, tag.index).split('\n').length;
+        offenders.push(`${path.replace(/^\.\.\//, '')}:${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});

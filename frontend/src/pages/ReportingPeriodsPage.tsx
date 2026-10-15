@@ -36,7 +36,7 @@ import { templatesApi } from '../lib/templates.api';
 import { publishedTemplatePicker } from '../lib/pickers';
 import { getErrorMessage } from '../lib/api';
 import { PERIOD_STATUS_TONE, PERIOD_PHASE_TONE } from '../lib/status';
-import { formatDate, toDateInputValue } from '../lib/format';
+import { formatDate, joinMeta, toDateInputValue } from '../lib/format';
 import {
   PERIOD_FREQUENCIES,
   PERIOD_STATUSES,
@@ -274,23 +274,52 @@ export function ReportingPeriodsPage() {
 
   const columns: Column<ReportingPeriod>[] = [
     {
-      header: 'Template',
+      /*
+       * The period first, the questionnaire under it (NCA, 15 October 2026: "Reporting Periods
+       * List is not readable - the template names").
+       *
+       * The list used to lead with the template name in a column of its own, with no declared
+       * width and seven columns fighting for the row. With the demonstration data that was fine;
+       * the Authority's real questionnaire is called "Questionnaire for Regulatory and
+       * Infrastructure Data Tracking", which is fifty-eight characters, and it squeezed every
+       * other column down to nothing.
+       *
+       * It also buried the thing people actually scan for. Somebody looking down this list is
+       * looking for "2026 Q1", not for the name of the questionnaire - which, on most of these
+       * screens, is the same on every row.
+       */
+      header: 'Period',
+      sortKey: 'label',
+      /*
+       * No width, on purpose: this is the one column that takes whatever is left.
+       *
+       * Every other column declares its width, and with `table-fixed` the browser takes any
+       * shortfall from whichever columns did not. A first attempt gave this column a fixed 22rem
+       * and left Actions undeclared, and the browser duly crushed Actions until its heading read
+       * "ACTIO..." and the open/close button was cut off. The column that holds the long text is
+       * the one that should give way, and its full text is still there on hover.
+       */
       cell: (p) => (
-        <span className="font-medium text-gray-900">
-          {p.template.name} <span className="text-gray-500">v{p.template.version}</span>
-        </span>
+        <div className="min-w-0">
+          <div className="truncate font-medium text-gray-900">{p.label}</div>
+          <div className="truncate text-xs text-gray-500" title={p.template.name}>
+            {joinMeta(
+              `${p.template.name} v${p.template.version}`,
+              REPORTING_FREQUENCY_LABELS[p.frequency],
+            )}
+          </div>
+        </div>
       ),
     },
     {
-      header: 'Frequency',
-      sortKey: 'frequency',
-      cell: (p) => <span className="text-gray-600">{REPORTING_FREQUENCY_LABELS[p.frequency]}</span>,
-    },
-    {
-      header: 'Period',
+      header: 'Covering',
       sortKey: 'periodStart',
+      // Sized for the longest the formatter produces, "01 Sept 2025 to 30 Sept 2025". At 13rem it
+      // cut the end year off, which is the one part of a date range nobody can guess.
+      width: '14.5rem',
+      hideOnMobile: true,
       cell: (p) => (
-        <span className="text-gray-600">
+        <span className="whitespace-nowrap text-gray-600">
           {formatDate(p.periodStart)} to {formatDate(p.periodEnd)}
         </span>
       ),
@@ -298,10 +327,12 @@ export function ReportingPeriodsPage() {
     {
       header: 'Due',
       sortKey: 'dueDate',
-      cell: (p) => <span className="text-gray-600">{formatDate(p.dueDate)}</span>,
+      width: '7.5rem',
+      cell: (p) => <span className="whitespace-nowrap text-gray-600">{formatDate(p.dueDate)}</span>,
     },
     {
       header: 'Phase',
+      width: '7rem',
       cell: (p) => (
         <Badge tone={PERIOD_PHASE_TONE[p.timeline.phase]}>
           {PERIOD_PHASE_LABELS[p.timeline.phase]}
@@ -311,6 +342,7 @@ export function ReportingPeriodsPage() {
     {
       header: 'Status',
       sortKey: 'status',
+      width: '7rem',
       cell: (p) => (
         <Badge tone={PERIOD_STATUS_TONE[p.status]}>{PERIOD_STATUS_LABELS[p.status]}</Badge>
       ),
@@ -318,6 +350,8 @@ export function ReportingPeriodsPage() {
     {
       header: 'Actions',
       align: 'right',
+      // Up to four buttons on a scheduled period: open, close, edit, delete.
+      width: '9.5rem',
       cell: (p) => (
         <div className="flex justify-end gap-1">
           {p.status !== 'OPEN' && (

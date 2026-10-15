@@ -335,7 +335,7 @@ export function TemplateEditorPage() {
           onChange={onChange}
           options={fieldRefOptions}
           invalid={!!rErrors[name]}
-          placeholder="Select a field…"
+          placeholder="Select a field"
         />
       )}
     />

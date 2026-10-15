@@ -15,7 +15,8 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:browser": "playwright test",
-    "test:browser:ui": "playwright test --ui"
+    "test:browser:ui": "playwright test --ui",
+    "test:browser:free-ports": "node scripts/free-test-ports.mjs"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx}": [

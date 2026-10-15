@@ -23,8 +23,9 @@ export function otpEmail(opts: {
   code: string;
   expiresInMinutes: number;
   year: number;
+  logoUrl?: string;
 }): RenderedEmail {
-  const { firstName, lastName, email, code, expiresInMinutes, year } = opts;
+  const { firstName, lastName, email, code, expiresInMinutes, year, logoUrl } = opts;
   const name = greetingName(firstName, lastName);
   const subject = 'Your NCA Portal verification code';
 
@@ -56,6 +57,7 @@ export function otpEmail(opts: {
   return {
     subject,
     html: baseLayout({
+      logoUrl,
       title: 'Verify your sign-in',
       contentHtml: content,
       preheader: 'Use the verification code inside to finish signing in.',
@@ -70,8 +72,9 @@ export function passwordResetEmail(opts: {
   resetUrl: string;
   expiresInMinutes: number;
   year: number;
+  logoUrl?: string;
 }): RenderedEmail {
-  const { resetUrl, expiresInMinutes, year } = opts;
+  const { resetUrl, expiresInMinutes, year, logoUrl } = opts;
   const subject = 'Reset your password';
 
   const content =
@@ -99,6 +102,7 @@ export function passwordResetEmail(opts: {
   return {
     subject,
     html: baseLayout({
+      logoUrl,
       title: 'Reset your password',
       contentHtml: content,
       preheader: 'Use the link inside to set a new password.',
@@ -114,8 +118,9 @@ export function welcomeEmail(opts: {
   temporaryPassword: string;
   loginUrl: string;
   year: number;
+  logoUrl?: string;
 }): RenderedEmail {
-  const { email, temporaryPassword, loginUrl, year } = opts;
+  const { email, temporaryPassword, loginUrl, year, logoUrl } = opts;
   const subject = 'Your NCA Portal account has been created';
 
   const content =
@@ -147,6 +152,7 @@ export function welcomeEmail(opts: {
   return {
     subject,
     html: baseLayout({
+      logoUrl,
       title: 'Welcome to the NCA Data Collection Portal',
       contentHtml: content,
       preheader: 'Your account is ready. Sign in with the details inside.',
@@ -169,8 +175,9 @@ export function notificationEmail(opts: {
   actionUrl?: string;
   actionLabel?: string;
   year: number;
+  logoUrl?: string;
 }): RenderedEmail {
-  const { firstName, lastName, title, body, actionUrl, actionLabel, year } = opts;
+  const { firstName, lastName, title, body, actionUrl, actionLabel, year, logoUrl } = opts;
   const name = greetingName(firstName, lastName);
 
   const content =
@@ -189,6 +196,7 @@ export function notificationEmail(opts: {
   return {
     subject: title,
     html: baseLayout({
+      logoUrl,
       title,
       contentHtml: content,
       preheader: body.slice(0, 120),

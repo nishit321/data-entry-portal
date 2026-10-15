@@ -321,7 +321,7 @@ export function EnforcementPage() {
       />
 
       <div className="mt-6">
-        <PenaltySchedulePanel canManage={canManage} />
+        <PenaltySchedulePanel canManage={canManage} canEditSchedule={user?.role === 'ADMIN'} />
       </div>
 
       <Drawer

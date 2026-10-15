@@ -19,7 +19,9 @@ import {
   useToast,
   type SelectOption,
 } from '../components/ui';
+import { useQuery } from '@tanstack/react-query';
 import { complaintsApi, type FiledComplaint } from '../lib/complaints.api';
+import { publicPortalApi, publicPortalKeys } from '../lib/public-portal.api';
 import { getErrorMessage } from '../lib/api';
 import { COMPLAINT_STATUS_TONE } from '../lib/status';
 import { formatDate, formatFileSize, joinMeta } from '../lib/format';
@@ -74,6 +76,25 @@ export function PublicComplaintPage() {
   const [files, setFiles] = useState<File[]>([]);
   /** Files the Authority did not get, named on the receipt rather than swallowed. */
   const [failedUploads, setFailedUploads] = useState<string[]>([]);
+  const [aboutEntityId, setAboutEntityId] = useState('');
+
+  /*
+   * The licensed operators, so a citizen can say who the complaint is about.
+   *
+   * The field has always existed on the API and the form never offered it, which meant almost
+   * every complaint on file names nobody. Any per-operator breakdown the Authority asks for is
+   * empty until this is collected, whichever screen it ends up on.
+   *
+   * A failure here must not stop somebody filing: the list is a convenience, the complaint is the
+   * point. So there is no error state, and the field simply does not appear if the list cannot be
+   * fetched.
+   */
+  const operatorsQuery = useQuery({
+    queryKey: publicPortalKeys.operators,
+    queryFn: () => publicPortalApi.operators(),
+    retry: 1,
+  });
+  const operators = operatorsQuery.data ?? [];
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -111,6 +132,7 @@ export function PublicComplaintPage() {
         complainantName: values.complainantName || undefined,
         complainantEmail: values.complainantEmail || undefined,
         complainantPhone: values.complainantPhone || undefined,
+        aboutEntityId: aboutEntityId || undefined,
       });
 
       /*
@@ -248,6 +270,35 @@ export function PublicComplaintPage() {
         <FormField htmlFor="cmp-subject" label="Subject" error={errors.subject?.message}>
           <Input id="cmp-subject" placeholder="A short summary" {...form.register('subject')} />
         </FormField>
+
+        {/*
+          Optional, and it stays optional.
+
+          Filing anonymously is a right this desk exists to protect, and so is complaining without
+          being sure whose fault it was. Somebody whose mobile money transfer failed may not know
+          whether the problem was their operator or the recipient's. "I am not sure" is the first
+          choice for that reason, and it is what the field starts on.
+        */}
+        {operators.length > 0 && (
+          <Field
+            label="Which operator is this about?"
+            htmlFor="cmp-operator"
+            hint="Leave this as it is if you are not sure. It helps the Authority route your message."
+          >
+            <Select
+              id="cmp-operator"
+              // `Select` renders a button, and a `<label for>` does not name a button. Every other
+              // Select in the portal carries this for the same reason.
+              aria-label="Which operator is this about?"
+              value={aboutEntityId}
+              options={[
+                { value: '', label: 'I am not sure' },
+                ...operators.map((o) => ({ value: o.id, label: o.name })),
+              ]}
+              onChange={setAboutEntityId}
+            />
+          </Field>
+        )}
 
         <FormField
           htmlFor="cmp-description"

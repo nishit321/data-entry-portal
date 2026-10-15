@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { PanelLeftClose, PanelLeftOpen, ShieldCheck, X } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
+import { BrandMark } from '../BrandMark';
+import { strings } from '../../lib/strings';
+import { APP_VERSION } from '../../lib/app-version';
 import { useAuth } from '../../context/AuthContext';
 import { BELOW_LG, useMediaQuery } from '../../hooks/useMediaQuery';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { Tooltip } from '../ui/Tooltip';
 import { NAV_ITEMS, NAV_SECTIONS, type NavItem } from './nav';
 import { useNavCounts } from './useNavCounts';
-
-const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'v0.1 (demo)';
 
 /**
  * Left navigation (FRONTEND_STANDARDS §3.10).
@@ -85,12 +86,10 @@ export function Sidebar({
           } px-5`}
         >
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-600">
-              <ShieldCheck size={20} />
-            </div>
+            <BrandMark size={36} />
             <div className={`leading-tight ${collapsed ? 'lg:hidden' : ''}`}>
-              <div className="text-sm font-semibold">NCA Portal</div>
-              <div className="text-[11px] text-sidebar-dim">Data Collection</div>
+              <div className="text-sm font-semibold">{strings.brand.portalShort}</div>
+              <div className="text-[11px] text-sidebar-dim">{strings.brand.portalTagline}</div>
             </div>
           </div>
           <button
@@ -142,7 +141,7 @@ export function Sidebar({
             <span className={collapsed ? 'lg:hidden' : ''}>Collapse</span>
           </button>
           <p className={`px-3 pt-2 text-[11px] text-sidebar-dim ${collapsed ? 'lg:hidden' : ''}`}>
-            NCA Data Collection Portal
+            {strings.brand.portal}
             <br />
             {APP_VERSION}
           </p>

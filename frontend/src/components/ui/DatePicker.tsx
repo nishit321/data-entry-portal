@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { FloatingPanel } from './_popover';
+import { Tooltip } from './Tooltip';
+
+/** The four month/year step buttons in the calendar header, which differ only in their icon. */
+const STEP =
+  'rounded p-1 text-gray-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand';
+
+/** The two shortcuts under the grid. */
+const FOOTER =
+  'rounded-md py-1 text-xs text-gray-600 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand';
 
 const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 const WEEKDAY_NAMES = [
@@ -115,11 +124,37 @@ export function DatePicker({
     setFocusedISO(value || toISO(seed.year, seed.month, new Date().getDate()));
   }, [open, seed, value]);
 
-  // Keep the DOM focus on whichever day cell the keyboard is on.
+  // Has the calendar taken focus for this opening yet? Resets when it closes.
+  const tookFocus = useRef(false);
+  /**
+   * Set by the grid's own key handler, and the only reliable signal that the keyboard is driving.
+   * Asking `grid.contains(document.activeElement)` after the fact cannot work: stepping the view
+   * unmounts the cell that had focus, the browser drops focus to the body, and by the time the
+   * effect runs the grid truthfully contains nothing focused. That reading is exactly backwards
+   * from what happened, and it is why a second PageUp did nothing.
+   */
+  const keyboardDriven = useRef(false);
+
+  // Keep the DOM focus on whichever day cell the keyboard is on. Once, when the calendar opens,
+  // and thereafter only while focus is already inside the grid: a user clicking the year arrow
+  // repeatedly is holding focus on that arrow, and yanking it into the grid after every click
+  // would mean re-finding the arrow each time.
   useEffect(() => {
-    if (!open || !focusedISO) return;
-    gridRef.current?.querySelector<HTMLElement>(`[data-iso="${focusedISO}"]`)?.focus();
-  }, [open, focusedISO]);
+    if (!open) {
+      tookFocus.current = false;
+      keyboardDriven.current = false;
+      return;
+    }
+    if (!focusedISO) return;
+    const grid = gridRef.current;
+    const cell = grid?.querySelector<HTMLElement>(`[data-iso="${focusedISO}"]`);
+    if (!grid || !cell) return;
+    if (!tookFocus.current || keyboardDriven.current || grid.contains(document.activeElement)) {
+      cell.focus();
+      tookFocus.current = true;
+      keyboardDriven.current = false;
+    }
+  }, [open, focusedISO, view]);
 
   // Whole weeks, because `role="grid"` is only meaningful when it is made of rows. A flat run of
   // cells renders identically and reads as nothing: a screen reader announcing "column 3" with no
@@ -138,11 +173,33 @@ export function DatePicker({
   const todayISO = toISO(today.getFullYear(), today.getMonth(), today.getDate());
 
   const isOutOfRange = (iso: string) => (min && iso < min) || (max && iso > max);
+  const todayOutOfRange = Boolean(isOutOfRange(todayISO));
 
-  const move = (delta: number) => {
-    const m = view.month + delta;
-    setView({ year: view.year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 });
+  /**
+   * Step the shown month, carrying the keyboard cursor with it.
+   *
+   * Moving the view alone left `focusedISO` pointing at a cell that had just been unmounted, so
+   * the browser dropped focus to the body and the *next* key press never reached the grid at all:
+   * one PageUp worked, a second did nothing. Keeping the same day of the month (clamped, so the
+   * 31st lands on the 30th rather than spilling into the next month) also keeps the cursor
+   * somewhere the user can reason about.
+   */
+  const stepMonths = (months: number) => {
+    const target = new Date(view.year, view.month + months, 1);
+    const year = target.getFullYear();
+    const month = target.getMonth();
+    const day = parseISO(focusedISO)?.getDate() ?? 1;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    setView({ year, month });
+    setFocusedISO(toISO(year, month, Math.min(day, lastDay)));
   };
+
+  const move = (delta: number) => stepMonths(delta);
+
+  // A year at a time. Month arrows alone are fine for "next Tuesday" and useless for the dates
+  // this product is actually full of: a licence issued in 2015 sat about a hundred and thirty
+  // clicks away from today, which is not a date picker, it is a dare.
+  const moveYear = (delta: number) => stepMonths(delta * 12);
 
   const commit = (iso: string) => {
     if (isOutOfRange(iso)) return;
@@ -163,6 +220,8 @@ export function DatePicker({
   };
 
   const onGridKeyDown = (e: React.KeyboardEvent) => {
+    // Whatever this press turns into, focus belongs back in the grid afterwards.
+    keyboardDriven.current = true;
     const step: Record<string, number> = {
       ArrowRight: 1,
       ArrowLeft: -1,
@@ -174,10 +233,13 @@ export function DatePicker({
       shiftFocus(step[e.key]!);
     } else if (e.key === 'PageDown') {
       e.preventDefault();
-      move(1);
+      // Shift makes it a year, which is the convention every other calendar uses (WAI-ARIA APG).
+      if (e.shiftKey) moveYear(1);
+      else move(1);
     } else if (e.key === 'PageUp') {
       e.preventDefault();
-      move(-1);
+      if (e.shiftKey) moveYear(-1);
+      else move(-1);
     } else if (e.key === 'Home') {
       e.preventDefault();
       setFocusedISO(toISO(view.year, view.month, 1));
@@ -226,26 +288,46 @@ export function DatePicker({
           role="dialog"
           aria-label={ariaLabel ? `Choose a date for ${ariaLabel}` : 'Choose date'}
         >
-          <div className="mb-2 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => move(-1)}
-              aria-label="Previous month"
-              className="rounded p-1 text-gray-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span aria-live="polite" className="text-sm font-medium text-gray-800">
+          <div className="mb-2 flex items-center justify-between gap-1">
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => moveYear(-1)}
+                aria-label="Previous year"
+                className={STEP}
+              >
+                <ChevronsLeft size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => move(-1)}
+                aria-label="Previous month"
+                className={STEP}
+              >
+                <ChevronLeft size={16} />
+              </button>
+            </div>
+            <span aria-live="polite" className="min-w-0 truncate text-sm font-medium text-gray-800">
               {MONTHS[view.month]} {view.year}
             </span>
-            <button
-              type="button"
-              onClick={() => move(1)}
-              aria-label="Next month"
-              className="rounded p-1 text-gray-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              <ChevronRight size={16} />
-            </button>
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => move(1)}
+                aria-label="Next month"
+                className={STEP}
+              >
+                <ChevronRight size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveYear(1)}
+                aria-label="Next year"
+                className={STEP}
+              >
+                <ChevronsRight size={16} />
+              </button>
+            </div>
           </div>
 
           <div
@@ -315,19 +397,45 @@ export function DatePicker({
             ))}
           </div>
 
-          {value && (
-            <button
-              type="button"
-              onClick={() => {
-                onChange('');
-                setOpen(false);
-                triggerRef.current?.focus();
-              }}
-              className="mt-2 w-full rounded-md py-1 text-xs text-gray-500 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            >
-              Clear
-            </button>
-          )}
+          {/*
+            Today is where a date is picked from far more often than not, and it was the one date
+            the calendar had no way to reach in a single move once the view had wandered. It sits
+            beside Clear rather than under the grid so the panel keeps one row of chrome, not two.
+          */}
+          <div className="mt-2 flex items-center gap-2 border-t border-gray-100 pt-2">
+            {todayOutOfRange ? (
+              <Tooltip
+                content="Today falls outside the dates this field allows."
+                className="flex-1"
+              >
+                <button
+                  type="button"
+                  aria-disabled
+                  onClick={(e) => e.preventDefault()}
+                  className={`${FOOTER} w-full cursor-not-allowed opacity-50`}
+                >
+                  Today
+                </button>
+              </Tooltip>
+            ) : (
+              <button type="button" onClick={() => commit(todayISO)} className={`${FOOTER} flex-1`}>
+                Today
+              </button>
+            )}
+            {value && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange('');
+                  setOpen(false);
+                  triggerRef.current?.focus();
+                }}
+                className={`${FOOTER} flex-1`}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
       </FloatingPanel>
     </div>

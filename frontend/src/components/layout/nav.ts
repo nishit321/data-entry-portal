@@ -23,6 +23,7 @@ import {
   KeyRound,
   Antenna,
   ShieldCheck,
+  Settings2,
 } from 'lucide-react';
 import type { Role } from '../../lib/types';
 
@@ -212,6 +213,13 @@ export const NAV_ITEMS: NavItem[] = [
   },
 
   { label: 'Users', to: '/users', icon: Users, section: 'administration', roles: ['ADMIN'] },
+  {
+    label: 'Settings',
+    to: '/settings',
+    icon: Settings2,
+    section: 'administration',
+    roles: ['ADMIN'],
+  },
   {
     label: 'System health',
     to: '/system',

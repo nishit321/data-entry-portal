@@ -75,6 +75,8 @@ enum AuditAction {
   TEMPLATE_CREATED
   TEMPLATE_UPDATED
   TEMPLATE_PUBLISHED
+  TEMPLATE_ARCHIVED
+  TEMPLATE_RESTORED
   TEMPLATE_DELETED
   TEMPLATE_VERSIONED
   TEMPLATE_SECTION_SAVED
@@ -107,6 +109,7 @@ enum AuditAction {
   PENALTY_RULE_CREATED
   PENALTY_RULE_UPDATED
   PENALTY_RULE_DELETED
+  SETTING_UPDATED
   PUBLIC_INDICATOR_CREATED
   PUBLIC_INDICATOR_UPDATED
   PUBLIC_INDICATOR_DELETED
@@ -639,10 +642,10 @@ model User {
   apiCredential            ApiClient?           @relation("ApiClientServiceUser")
   signingCertificates      SigningCertificate[] @relation("UserSigningCertificates")
 
-
   draftedOrders  EnforcementOrder[] @relation("OrderDraftedBy")
   approvedOrders EnforcementOrder[] @relation("OrderApprovedBy")
   revokedOrders  EnforcementOrder[] @relation("OrderRevokedBy")
+
   @@index([role])
   @@index([isActive])
   @@index([entityId])
@@ -1145,8 +1148,8 @@ model EnforcementCase {
   ///
   /// These two dates gate when a figure becomes payable. They do not move `defaultStartedAt`,
   /// which is what the figure is calculated from.
-  remedyNoticeAt    DateTime? @map("remedy_notice_at")
-  remedyDueAt       DateTime? @map("remedy_due_at")
+  remedyNoticeAt DateTime? @map("remedy_notice_at")
+  remedyDueAt    DateTime? @map("remedy_due_at")
 
   orders EnforcementOrder[]
 
@@ -1188,13 +1191,13 @@ model EnforcementOrder {
   status EnforcementOrderStatus @default(DRAFT)
 
   /// Why the Authority is doing this, in words an operator and a court can both read.
-  reason String
+  reason        String
   /// The section of the Act it rests on. An order without one is not enforceable.
-  legalBasis String @map("legal_basis")
+  legalBasis    String   @map("legal_basis")
   /// When it takes effect. Not the same as when it was approved — notice periods exist.
   effectiveFrom DateTime @map("effective_from")
   /// How long it runs. Null for a cancellation, which does not end.
-  durationDays Int? @map("duration_days")
+  durationDays  Int?     @map("duration_days")
 
   /// The Board minute that authorised a cancellation. Required for that type and no other.
   boardMinuteRef String?   @map("board_minute_ref")
@@ -1350,6 +1353,29 @@ model ComplaintAttachment {
 /// the configured percentage of their assessable (approved) revenue; the rate is config, set by the
 /// Authority, and changes over time — the applicable rate for a period is the one whose window
 /// covers that period's due date. Soft-deleted; retained for the assessment history.
+/// One operational switch an administrator can change without a redeploy.
+///
+/// A tiny key/value table on purpose. The alternative is a column per switch and a migration every
+/// time the Authority wants to turn something on or off, which is how a setting ends up living in
+/// an environment file that nobody at the Authority can reach.
+///
+/// The valid keys are a typed registry in the application, not whatever reaches the table: an
+/// unknown key is refused, so a typo cannot quietly create a setting that nothing ever reads. A row
+/// exists only once somebody has changed a setting; until then the registry's default is the
+/// answer, which is why there is no seeding step.
+model SystemSetting {
+  /// Registry key, e.g. "signup.enabled".
+  key String @id
+
+  /// Held as text and parsed against the type the registry declares for the key.
+  value String
+
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
 model LevyRate {
   id            String    @id @default(uuid()) @db.Uuid
   /// Percentage of assessable revenue, e.g. 2.5000 for 2.5%.
@@ -1377,18 +1403,18 @@ model LevyRate {
 /// closed contravention because the schedule changed afterwards would not survive
 /// challenge, so the rule that priced a case is recorded on the case itself.
 model PenaltyRule {
-  id            String            @id @default(uuid()) @db.Uuid
-  reason        EnforcementReason @default(MISSED_DEADLINE)
+  id               String            @id @default(uuid()) @db.Uuid
+  reason           EnforcementReason @default(MISSED_DEADLINE)
   /// Applies to one class of operator, or to every class when null.
-  entityType    EntityType?       @map("entity_type")
+  entityType       EntityType?       @map("entity_type")
   /// Charged once when the contravention is recorded (SSP).
-  fixedAmount   Decimal           @default(0) @map("fixed_amount") @db.Decimal(18, 2)
+  fixedAmount      Decimal           @default(0) @map("fixed_amount") @db.Decimal(18, 2)
   /// Charged for each further day the default continues (SSP).
-  dailyAmount   Decimal           @default(0) @map("daily_amount") @db.Decimal(18, 2)
+  dailyAmount      Decimal           @default(0) @map("daily_amount") @db.Decimal(18, 2)
   /// Ceiling on the total. Uncapped when null.
-  maxAmount     Decimal?          @map("max_amount") @db.Decimal(18, 2)
+  maxAmount        Decimal?          @map("max_amount") @db.Decimal(18, 2)
   /// Floor on the total, for the tiers the Act states as "a percentage, minimum X".
-  minAmount     Decimal?          @map("min_amount") @db.Decimal(18, 2)
+  minAmount        Decimal?          @map("min_amount") @db.Decimal(18, 2)
   /// Percentage of the operator's audited annual revenue (NCA, 3 September 2026).
   ///
   /// Tiers 2 and 3 of the schedule are not fixed sums: QoS is "0.2% of audited annual revenue,
@@ -1399,16 +1425,16 @@ model PenaltyRule {
   /// The figure it multiplies is the revenue on the operator's **annual** return, which
   /// VALIDATION_SPEC §4.1 already defines as entered from audited accounts rather than summed from
   /// the quarters. Until that return exists, a percentage line has no amount and the case says so.
-  percentOfRevenue Decimal?       @map("percent_of_revenue") @db.Decimal(7, 4)
+  percentOfRevenue Decimal?          @map("percent_of_revenue") @db.Decimal(7, 4)
   /// How the schedule names this line, e.g. the regulation it comes from.
-  label         String?
-  effectiveFrom DateTime          @map("effective_from")
+  label            String?
+  effectiveFrom    DateTime          @map("effective_from")
   /// Open-ended when null (applies to every contravention on or after `effectiveFrom`).
-  effectiveTo   DateTime?         @map("effective_to")
-  createdById   String?           @map("created_by_id") @db.Uuid
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
-  deletedAt     DateTime?         @map("deleted_at")
+  effectiveTo      DateTime?         @map("effective_to")
+  createdById      String?           @map("created_by_id") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  deletedAt        DateTime?         @map("deleted_at")
 
   cases EnforcementCase[]
 
@@ -1565,28 +1591,28 @@ model NetworkSite {
 /// geometry supplies it and the map draws the real thing; an operator that has not yet gets the
 /// straight line, and the map says so rather than implying a survey nobody did.
 model FibreLink {
-  id            String            @id @default(uuid()) @db.Uuid
-  entityId      String            @map("entity_id") @db.Uuid
+  id             String            @id @default(uuid()) @db.Uuid
+  entityId       String            @map("entity_id") @db.Uuid
   /// Operator-assigned reference, unique within the owning operator so a re-import
   /// updates a route rather than laying a second one alongside it.
-  linkReference String            @map("link_reference")
-  name          String
-  status        NetworkSiteStatus @default(ACTIVE)
-  fromSiteId    String            @map("from_site_id") @db.Uuid
-  toSiteId      String            @map("to_site_id") @db.Uuid
+  linkReference  String            @map("link_reference")
+  name           String
+  status         NetworkSiteStatus @default(ACTIVE)
+  fromSiteId     String            @map("from_site_id") @db.Uuid
+  toSiteId       String            @map("to_site_id") @db.Uuid
   /// Route length in kilometres as the operator reports it. Longer than the straight-line
   /// distance, usually by a lot, because cable follows roads: it is the figure that matters
   /// for capacity planning and it cannot be derived from the two endpoints.
-  lengthKm      Decimal?          @map("length_km") @db.Decimal(10, 3)
+  lengthKm       Decimal?          @map("length_km") @db.Decimal(10, 3)
   /// Lit capacity in Gbit/s, where the operator reports one.
-  capacityGbps  Int?              @map("capacity_gbps")
+  capacityGbps   Int?              @map("capacity_gbps")
   /// The route itself: an ordered list of [latitude, longitude] pairs from one end to the
   /// other, or null when the operator has only told us which two nodes are joined.
-  path          Json?
-  commissionedAt DateTime?        @map("commissioned_at")
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
-  deletedAt     DateTime?         @map("deleted_at")
+  path           Json?
+  commissionedAt DateTime?         @map("commissioned_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  deletedAt      DateTime?         @map("deleted_at")
 
   entity   Entity      @relation(fields: [entityId], references: [id], onDelete: Cascade)
   fromSite NetworkSite @relation("FibreLinkFrom", fields: [fromSiteId], references: [id], onDelete: Cascade)

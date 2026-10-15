@@ -99,3 +99,43 @@ describe('shared strings', () => {
     }
   });
 });
+
+/**
+ * The Authority's name, spelled the way its own seal spells it.
+ *
+ * This had gone wrong in the quietest possible place. The header stamped onto every printed sheet
+ * read "National Communications Authority" — with an s the Authority does not have — and printed
+ * sheets are the ones that end up in case files and attached to letters. Nobody reads the header
+ * of a page they printed; they read the figures.
+ *
+ * So this is checked against the sources rather than against a screen. A wrong spelling is not a
+ * layout bug that shows up in a screenshot, it is a word, and a word can be looked for.
+ */
+describe("the Authority's name", () => {
+  const WRONG = [
+    // The seal reads NATIONAL COMMUNICATION AUTHORITY, singular.
+    /National Communications Authority/,
+    // The seal reads REPUBLIC OF SOUTH SUDAN. "South Sudan" alone is not the Authority's style,
+    // and the two forms sat on the sign-in screen and in the emails at the same time.
+    /National Communication Authority, South Sudan/,
+  ];
+
+  it('is not misspelled anywhere in the app', () => {
+    const offenders: string[] = [];
+    for (const [path, source] of Object.entries(SOURCES)) {
+      for (const wrong of WRONG) {
+        if (wrong.test(source)) offenders.push(`${path.replace(/^\.\.\//, '')}  ${wrong}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('is actually looking for something findable', () => {
+    // A check whose patterns could never match anything would pass for ever. This proves the
+    // patterns work by running them against the thing they are meant to catch.
+    expect(WRONG.some((w) => w.test('the National Communications Authority said'))).toBe(true);
+    expect(WRONG.some((w) => w.test('National Communication Authority, South Sudan'))).toBe(true);
+    // And that the correct form is not caught by them.
+    expect(WRONG.some((w) => w.test(strings.brand.authorityFull))).toBe(false);
+  });
+});

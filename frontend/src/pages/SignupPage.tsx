@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { AuthLayout } from '../components/auth/AuthLayout';
 import { Alert, Button, FormField, Input, PasswordInput } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { usePublicSettings } from '../hooks/usePublicSettings';
 import { authApi } from '../lib/auth.api';
 import { getErrorMessage } from '../lib/api';
 
@@ -23,6 +24,7 @@ type FormValues = z.infer<typeof schema>;
 export function SignupPage() {
   const { setSession } = useAuth();
   const navigate = useNavigate();
+  const { signupEnabled, isLoading: settingsLoading } = usePublicSettings();
 
   const [error, setError] = useState('');
 
@@ -31,6 +33,32 @@ export function SignupPage() {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
+
+  /*
+   * The door is shut, and this page is reachable by typing the address.
+   *
+   * Said plainly, with what to do instead. Letting somebody fill the form in and then refusing it
+   * wastes their time and tells them nothing about why. Nothing is rendered while the answer is
+   * still arriving, so the form does not appear and then vanish under them.
+   */
+  if (!settingsLoading && signupEnabled === false) {
+    return (
+      <AuthLayout
+        title="Accounts are issued by the Authority"
+        subtitle="This portal does not take applications."
+        footer={
+          <Link to="/login" className="font-medium text-brand hover:underline">
+            {strings.action.backToSignIn}
+          </Link>
+        }
+      >
+        <Alert tone="info">
+          Operators are given an account when their licence is recorded. If you need access, or
+          think you should already have it, contact the Authority.
+        </Alert>
+      </AuthLayout>
+    );
+  }
 
   const onSubmit = handleSubmit(async (values) => {
     setError('');

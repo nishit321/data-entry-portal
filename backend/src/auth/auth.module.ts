@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SettingsModule } from '../settings/settings.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -11,16 +12,21 @@ import { JwtConfig } from '../config/configuration';
 
 @Module({
   imports: [
+    SettingsModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const jwt = config.get<JwtConfig>('jwt')!;
-        return {
-          secret: jwt.secret,
-          signOptions: { expiresIn: jwt.expiresIn },
-        };
+        /*
+         * No `expiresIn` here.
+         *
+         * Every token is signed with a lifetime worked out from the idle timeout the Authority
+         * has set, so a default at this level could only ever be a second answer to the same
+         * question - and the wrong one on any server where somebody had changed the setting.
+         */
+        return { secret: jwt.secret };
       },
     }),
   ],
