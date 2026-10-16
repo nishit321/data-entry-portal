@@ -26,6 +26,12 @@ jobs:
   deploy:
     name: Release to production
     needs: ci
+    # The same commits are pushed to two repositories, the client's and a mirror,
+    # and only one of them may release. The concurrency group above is scoped to
+    # its own repository, so two releasing at once would race on the server. The
+    # other repository still runs CI and shows this job as skipped. Moving
+    # releases means changing this name and the repository the server fetches.
+    if: github.repository == 'nishit321/data-entry-portal'
     runs-on: ubuntu-latest
     environment:
       name: production
